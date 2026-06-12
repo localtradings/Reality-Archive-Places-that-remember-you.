@@ -38,5 +38,5 @@ export interface Place {
   memories: MemoryEntry[];
   museum: MuseumPreview;
   coordinates?: Coordinates;
-  origin?: 'mock' | 'geoapify';
+  origin?: 'mock' | 'geoapify' | 'search' | 'manual';
 }
