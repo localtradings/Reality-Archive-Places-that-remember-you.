@@ -1,139 +1,162 @@
 'use client';
 
+import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
-import {
-  ArchiveSectionHeader,
-  ArchiveShell,
-  EmptyArchiveState,
-  InkPanel,
-  MicrosoftIqLedger,
-  TornPaperButton,
-  TornPaperCard,
-} from '@/components/ArchiveUI';
-import { MoodBadge } from '@/components/MoodBadge';
-import { MuseumSection } from '@/components/MuseumSection';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArchiveShell } from '@/components/ArchiveUI';
 import { mockPlaces } from '@/data/mockPlaces';
-import { readLocalMemories, type SavedMemory } from '@/lib/local-memory';
-import {
-  buildMuseumGenerationCacheKey,
-  buildMuseumGenerationRequestPayload,
-  createMuseumArchiveSignature,
-  isMuseumGenerationResponseBody,
-  readMuseumGenerationCache,
-  writeMuseumGenerationCache,
-  type MicrosoftIqLayer,
-  type MicrosoftIqMode,
-  type MuseumGenerationProvider,
-  type MuseumGenerationResponseBody,
-} from '@/lib/museum-generation';
+import { formatMemoryTypeLabel, readLocalMemories, type MemoryType, type SavedMemory } from '@/lib/local-memory';
+import type { MuseumCollectionMode, MuseumCollectionSummaryResponse, MuseumPlaceSummary } from '@/lib/museum-collection';
+import { buildMuseumGenerationRequestPayload, createMuseumArchiveSignature } from '@/lib/museum-generation';
 import { buildGeoapifyPlaceFromSearchParams, readTemporaryPlace, storeTemporaryPlace } from '@/lib/place-archive';
-import type { MuseumPreview, Place } from '@/types';
+import { readVisitedPlaces, visitedPlaceToPlace } from '@/lib/visited-places';
+import type { Place } from '@/types';
 
-type MuseumLoadState = 'loading' | 'generated' | 'fallback' | 'error';
-type MicrosoftIqStatusState = 'loading' | 'ready' | 'needs-setup' | 'error';
-type MicrosoftIqActionState = 'idle' | 'indexing' | 'success' | 'failed';
+type FoundryStoryState = 'idle' | 'loading' | 'live' | 'prepared' | 'error';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function getProviderLabel(provider: MuseumGenerationProvider | null) {
-  switch (provider) {
-    case 'foundry-iq':
-      return 'Foundry IQ';
-    case 'fallback':
-      return 'Static preview';
-    default:
-      return 'curating';
+function formatDate(value?: string) {
+  if (!value) {
+    return 'Not remembered yet';
   }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Not remembered yet';
+  }
+
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
 }
 
-function getStatusCopy(
-  state: MuseumLoadState,
-  provider: MuseumGenerationProvider | null,
-  source: MuseumGenerationResponseBody['source'] | null,
-  note: string,
-) {
-  if (state === 'generated') {
-    if (provider === 'foundry-iq') {
-      return {
-        label: 'Foundry IQ',
-        detail: 'This museum preview is grounded with Microsoft IQ archive context.',
-      };
-    }
-
-    return {
-      label: 'AI generated',
-      detail: 'This museum was generated from the current archive and its saved memories.',
-    };
+function getMemoryTitle(memory: SavedMemory) {
+  if (memory.title?.trim()) {
+    return memory.title.trim();
   }
 
-  if (provider === 'foundry-iq' || source === 'foundry-iq') {
-    return {
-      label: 'Foundry IQ archive preview',
-      detail: note || 'The museum preview is using the Microsoft IQ archive context for this place.',
-    };
+  if (memory.photoCaption?.trim()) {
+    return memory.photoCaption.trim();
+  }
+
+  if (memory.voiceTranscript?.trim()) {
+    return memory.voiceTranscript.trim().slice(0, 58);
+  }
+
+  return `${formatMemoryTypeLabel(memory.type)} memory`;
+}
+
+function getMemoryBody(memory: SavedMemory) {
+  if (memory.type === 'photo') {
+    return memory.photoCaption?.trim() || memory.text.trim();
+  }
+
+  if (memory.type === 'voice') {
+    return memory.voiceTranscript?.trim() || memory.text.trim();
+  }
+
+  return memory.text.trim();
+}
+
+function getMemoryTypes(memories: SavedMemory[]) {
+  const types = new Set<MemoryType>();
+  memories.forEach((memory) => types.add(memory.type));
+  return Array.from(types);
+}
+
+function buildSummary(place: Place, memories: SavedMemory[]) {
+  const latestMemory = memories[0];
+
+  if (latestMemory) {
+    const title = getMemoryTitle(latestMemory);
+    const memoryType = formatMemoryTypeLabel(latestMemory.type).toLowerCase();
+    return `${place.name} is saved in your living museum because you kept memories from this place. The latest ${memoryType} memory, "${title}", gives the exhibit its current story.`;
+  }
+
+  return `${place.name} is saved in your living museum. Add a text, photo, or voice memory to turn this place into a fuller exhibit.`;
+}
+
+function getSourcesUsed(memories: SavedMemory[]) {
+  const sources = ['Place details'];
+
+  if (memories.some((memory) => memory.type === 'text')) {
+    sources.push('Text memories');
+  }
+
+  if (memories.some((memory) => memory.type === 'photo')) {
+    sources.push('Photo memories');
+  }
+
+  if (memories.some((memory) => memory.type === 'voice')) {
+    sources.push('Voice memories');
+  }
+
+  return sources;
+}
+
+function normalizeFoundryStory(value: unknown): MuseumPlaceSummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.placeId !== 'string' || typeof value.title !== 'string' || typeof value.summary !== 'string' || typeof value.mood !== 'string') {
+    return null;
   }
 
   return {
-    label: 'Grounded archive',
-    detail: note || 'The static museum preview is being shown for this place.',
+    placeId: value.placeId,
+    title: value.title,
+    summary: value.summary,
+    mood: value.mood,
+    memoryHighlights: Array.isArray(value.memoryHighlights) ? value.memoryHighlights.filter((item): item is string => typeof item === 'string') : [],
+    citations: Array.isArray(value.citations) ? value.citations.filter((item): item is string => typeof item === 'string') : [],
   };
 }
 
-function getMicrosoftIqStatusCopy(state: MicrosoftIqStatusState, isConfigured: boolean) {
+function normalizeSummaryResponse(value: unknown): MuseumCollectionSummaryResponse | null {
+  if (!isRecord(value) || !Array.isArray(value.places)) {
+    return null;
+  }
+
+  const mode = value.mode === 'live' || value.mode === 'prepared' || value.mode === 'local' ? value.mode : null;
+  const provider = value.provider === 'foundry-iq' || value.provider === 'local' ? value.provider : null;
+  if (!mode || !provider) {
+    return null;
+  }
+
+  return {
+    mode,
+    provider,
+    places: value.places.map(normalizeFoundryStory).filter((item): item is MuseumPlaceSummary => item !== null),
+    sourceChunkCount: typeof value.sourceChunkCount === 'number' ? value.sourceChunkCount : undefined,
+    documentsUploaded: typeof value.documentsUploaded === 'number' ? value.documentsUploaded : undefined,
+    reason: typeof value.reason === 'string' ? value.reason : undefined,
+  };
+}
+
+function getStoryStatusLabel(state: FoundryStoryState, mode: MuseumCollectionMode | null) {
   if (state === 'loading') {
-    return {
-      label: 'Checking Microsoft IQ status...',
-      detail: 'Reading the Foundry IQ and Azure AI Search configuration from the server.',
-    };
+    return 'Writing with Foundry IQ';
   }
 
-  if (state === 'ready' && isConfigured) {
-    return {
-      label: 'Microsoft IQ configured',
-      detail: 'Azure AI Search is ready to index the archive and power live grounding.',
-    };
+  if (state === 'live' && mode === 'live') {
+    return 'Live Foundry IQ story';
   }
 
-  if (state === 'needs-setup') {
-    return {
-      label: 'Microsoft IQ setup needed',
-      detail: 'Set MICROSOFT_IQ_ENABLED=true and provide the Azure AI Search endpoint, key, and index name.',
-    };
+  if (state === 'prepared') {
+    return 'Foundry IQ fallback';
   }
 
-  return {
-    label: 'Microsoft IQ status unavailable',
-    detail: 'The app could not confirm Microsoft IQ configuration right now.',
-  };
-}
+  if (state === 'error') {
+    return 'Foundry IQ failed';
+  }
 
-function LoadingShell({ placeName }: { placeName: string }) {
-  return (
-    <ArchiveShell>
-      <TornPaperCard tone="light" className="archive-page-label">
-        <p className="archive-kicker">AI Living Museum</p>
-        <h1>Preparing your museum preview.</h1>
-        <p>Curating the mood, memory wall, and voice tour narrative for {placeName} from the selected archive.</p>
-      </TornPaperCard>
-      <InkPanel className="archive-curation-panel">
-        <div className="archive-progress-label">
-          <span>Curating</span>
-          <span>82%</span>
-        </div>
-        <div className="ra-progress">
-          <span className="w-[82%]" />
-        </div>
-        <ul>
-          <li>Reading saved memories for this place</li>
-          <li>Building the living exhibit and visitor notes</li>
-          <li>Preparing the voice tour and mini quest</li>
-        </ul>
-      </InkPanel>
-    </ArchiveShell>
-  );
+  return 'Foundry IQ story';
 }
 
 export function MuseumExperience() {
@@ -141,60 +164,52 @@ export function MuseumExperience() {
   const searchParams = useSearchParams();
   const placeId = Array.isArray(params.id) ? params.id[0] : params.id;
   const [place, setPlace] = useState<Place | null>(null);
-  const [museum, setMuseum] = useState<MuseumPreview | null>(null);
   const [localMemories, setLocalMemories] = useState<SavedMemory[]>([]);
   const [isResolvingPlace, setIsResolvingPlace] = useState(true);
-  const [isGeneratingMuseum, setIsGeneratingMuseum] = useState(false);
-  const [generationState, setGenerationState] = useState<MuseumLoadState>('loading');
-  const [generationProvider, setGenerationProvider] = useState<MuseumGenerationProvider | null>(null);
-  const [generationSource, setGenerationSource] = useState<MuseumGenerationResponseBody['source'] | null>(null);
-  const [microsoftIqLayer, setMicrosoftIqLayer] = useState<MicrosoftIqLayer>('foundry-iq');
-  const [microsoftIqMode, setMicrosoftIqMode] = useState<MicrosoftIqMode>('prepared');
-  const [groundingSources, setGroundingSources] = useState<string[]>([]);
-  const [citations, setCitations] = useState<string[]>([]);
-  const [indexedSourceChunkCount, setIndexedSourceChunkCount] = useState<number | null>(null);
-  const [microsoftIqStatusState, setMicrosoftIqStatusState] = useState<MicrosoftIqStatusState>('loading');
-  const [microsoftIqActionState, setMicrosoftIqActionState] = useState<MicrosoftIqActionState>('idle');
-  const [microsoftIqConfigured, setMicrosoftIqConfigured] = useState(false);
-  const [generationNote, setGenerationNote] = useState('');
-
+  const [foundryStory, setFoundryStory] = useState<MuseumPlaceSummary | null>(null);
+  const [foundryStoryState, setFoundryStoryState] = useState<FoundryStoryState>('idle');
+  const [foundryStoryMode, setFoundryStoryMode] = useState<MuseumCollectionMode | null>(null);
+  const [foundryStoryReason, setFoundryStoryReason] = useState('');
+  const [foundryStoryError, setFoundryStoryError] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
+  const lastFoundryRequestKey = useRef('');
   const searchParamsString = useMemo(() => searchParams.toString(), [searchParams]);
-  const loadingPlaceName = place?.name ?? 'this place';
-  const activeMuseum = museum ?? place?.museum ?? null;
-  const status = getStatusCopy(generationState, generationProvider, generationSource, generationNote);
-  const runtimeLabel = getProviderLabel(generationProvider);
-  const microsoftIqStatus = getMicrosoftIqStatusCopy(microsoftIqStatusState, microsoftIqConfigured);
+  const archivePayload = useMemo(() => (place ? buildMuseumGenerationRequestPayload(place, localMemories) : null), [place, localMemories]);
+  const archiveSignature = useMemo(() => (archivePayload ? createMuseumArchiveSignature(archivePayload) : ''), [archivePayload]);
 
   useEffect(() => {
     setIsResolvingPlace(true);
 
-    const timer = window.setTimeout(() => {
-      const mockPlace = mockPlaces.find((item) => item.id === placeId);
-      if (mockPlace) {
-        setPlace(mockPlace);
-        setIsResolvingPlace(false);
-        return;
-      }
-
-      const storedPlace = readTemporaryPlace(placeId);
-      if (storedPlace) {
-        setPlace(storedPlace);
-        setIsResolvingPlace(false);
-        return;
-      }
-
-      const tempPlace = buildGeoapifyPlaceFromSearchParams(new URLSearchParams(searchParamsString));
-      if (tempPlace) {
-        storeTemporaryPlace(tempPlace);
-        setPlace(tempPlace);
-      } else {
-        setPlace(null);
-      }
-
+    const mockPlace = mockPlaces.find((item) => item.id === placeId);
+    if (mockPlace) {
+      setPlace(mockPlace);
       setIsResolvingPlace(false);
-    }, 850);
+      return;
+    }
 
-    return () => window.clearTimeout(timer);
+    const visitedPlace = readVisitedPlaces().find((item) => item.id === placeId);
+    if (visitedPlace) {
+      setPlace(visitedPlaceToPlace(visitedPlace));
+      setIsResolvingPlace(false);
+      return;
+    }
+
+    const storedPlace = readTemporaryPlace(placeId);
+    if (storedPlace) {
+      setPlace(storedPlace);
+      setIsResolvingPlace(false);
+      return;
+    }
+
+    const tempPlace = buildGeoapifyPlaceFromSearchParams(new URLSearchParams(searchParamsString));
+    if (tempPlace) {
+      storeTemporaryPlace(tempPlace);
+      setPlace(tempPlace);
+    } else {
+      setPlace(null);
+    }
+
+    setIsResolvingPlace(false);
   }, [placeId, searchParamsString]);
 
   useEffect(() => {
@@ -202,368 +217,241 @@ export function MuseumExperience() {
   }, [placeId]);
 
   useEffect(() => {
-    if (place) {
-      setMuseum(place.museum);
+    if (!archivePayload || !archiveSignature) {
+      return;
     }
-  }, [place]);
 
-  useEffect(() => {
-    let active = true;
+    const requestPayload = archivePayload;
+    const requestKey = `${archivePayload.place.id}:${archiveSignature}:${retryCount}`;
+    if (lastFoundryRequestKey.current === requestKey) {
+      return;
+    }
 
-    async function loadMicrosoftIqStatus() {
-      setMicrosoftIqStatusState('loading');
+    let cancelled = false;
+    lastFoundryRequestKey.current = requestKey;
+    setFoundryStoryState('loading');
+    setFoundryStoryMode(null);
+    setFoundryStory(null);
+    setFoundryStoryReason('');
+    setFoundryStoryError('');
 
+    async function loadFoundryStory() {
       try {
-        const response = await fetch('/api/microsoft-iq/status', { cache: 'no-store' });
-        const data = (await response.json()) as unknown;
+        const response = await fetch('/api/microsoft-iq/summaries', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify({ places: [requestPayload] }),
+        });
 
-        if (!active) {
+        const responseText = await response.text();
+        let data: unknown = null;
+        try {
+          data = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          throw new Error(isRecord(data) && typeof data.error === 'string' ? data.error : 'Foundry IQ summary request failed.');
+        }
+
+        const summaryResponse = normalizeSummaryResponse(data);
+        const story = summaryResponse?.places.find((item) => item.placeId === requestPayload.place.id) ?? summaryResponse?.places[0] ?? null;
+        if (!summaryResponse || !story) {
+          throw new Error('Foundry IQ did not return a story summary for this place.');
+        }
+
+        if (cancelled) {
           return;
         }
 
-        if (!isRecord(data)) {
-          throw new Error('Invalid Microsoft IQ status response.');
-        }
-
-        const configured = Boolean(data.enabled && data.configured);
-        setMicrosoftIqConfigured(configured);
-        setMicrosoftIqStatusState(configured ? 'ready' : 'needs-setup');
-      } catch {
-        if (!active) {
+        setFoundryStory(story);
+        setFoundryStoryMode(summaryResponse.mode);
+        setFoundryStoryState(summaryResponse.mode === 'live' ? 'live' : 'prepared');
+        setFoundryStoryReason(summaryResponse.reason ?? '');
+      } catch (error) {
+        if (cancelled) {
           return;
         }
 
-        setMicrosoftIqConfigured(false);
-        setMicrosoftIqStatusState('error');
+        setFoundryStoryState('error');
+        setFoundryStoryMode(null);
+        setFoundryStory(null);
+        setFoundryStoryReason('');
+        setFoundryStoryError(error instanceof Error ? error.message : 'Foundry IQ could not write this story.');
       }
     }
 
-    loadMicrosoftIqStatus();
+    void loadFoundryStory();
 
     return () => {
-      active = false;
+      cancelled = true;
     };
-  }, []);
-
-  const archivePayload = useMemo(() => {
-    if (!place) {
-      return null;
-    }
-
-    return buildMuseumGenerationRequestPayload(place, localMemories);
-  }, [place, localMemories]);
-
-  const archiveSignature = useMemo(() => {
-    if (!archivePayload) {
-      return '';
-    }
-
-    return createMuseumArchiveSignature(archivePayload);
-  }, [archivePayload]);
-
-  const cacheKey = useMemo(() => {
-    if (!place || !archivePayload) {
-      return '';
-    }
-
-    return buildMuseumGenerationCacheKey(place.id, archiveSignature);
-  }, [archivePayload, archiveSignature, place]);
-
-  async function refreshMuseumPreview(options?: { bypassCache?: boolean }): Promise<MuseumGenerationResponseBody | null> {
-    if (!place || !archivePayload) {
-      return null;
-    }
-
-    const fallbackMuseum = place.museum;
-
-    if (!options?.bypassCache) {
-      const cached = readMuseumGenerationCache(cacheKey);
-      if (cached) {
-        setMuseum(cached.museum);
-        setGenerationState(cached.generated ? 'generated' : 'fallback');
-        setGenerationProvider(cached.provider);
-        setGenerationSource(cached.source);
-        setMicrosoftIqLayer(cached.microsoftIqLayer);
-        setMicrosoftIqMode(cached.microsoftIqMode);
-        setGroundingSources(cached.groundingSources);
-        setCitations(cached.citations);
-        setGenerationNote(cached.reason ?? '');
-        setIsGeneratingMuseum(false);
-        return cached;
-      }
-    }
-
-    setIsGeneratingMuseum(true);
-    setGenerationState('loading');
-    setGenerationProvider(null);
-    setGenerationSource(null);
-    setMicrosoftIqLayer('foundry-iq');
-    setMicrosoftIqMode('prepared');
-    setGroundingSources([]);
-    setCitations([]);
-    setGenerationNote('');
-
-    try {
-      const response = await fetch('/api/generate-museum', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(archivePayload),
-      });
-
-      const data = (await response.json()) as unknown;
-
-      if (!isMuseumGenerationResponseBody(data)) {
-        throw new Error('Invalid museum generation response.');
-      }
-
-      setMuseum(data.museum);
-      setGenerationState(data.generated ? 'generated' : 'fallback');
-      setGenerationProvider(data.provider);
-      setGenerationSource(data.source);
-      setMicrosoftIqLayer(data.microsoftIqLayer);
-      setMicrosoftIqMode(data.microsoftIqMode);
-      setGroundingSources(data.groundingSources);
-      setCitations(data.citations);
-      setGenerationNote(data.reason ?? '');
-      writeMuseumGenerationCache(cacheKey, data);
-      return data;
-    } catch {
-      setMuseum(fallbackMuseum);
-      setGenerationState('error');
-      setGenerationProvider('fallback');
-      setGenerationSource('fallback');
-      setMicrosoftIqLayer('foundry-iq');
-      setMicrosoftIqMode('prepared');
-      setGroundingSources(['Place metadata', 'Visitor memories', 'Photo captions', 'Voice transcripts', 'Moods']);
-      setCitations([]);
-      setGenerationNote('The live museum generator could not be reached, so the static archive preview is shown instead.');
-      return null;
-    } finally {
-      setIsGeneratingMuseum(false);
-    }
-  }
-
-  useEffect(() => {
-    void refreshMuseumPreview();
-  }, [archivePayload, cacheKey, place]);
-
-  async function handleMicrosoftIqIndex() {
-    if (!place || !archivePayload || !microsoftIqConfigured) {
-      return;
-    }
-
-    const approved = window.confirm(
-      'Indexing for Microsoft IQ will create or update an Azure AI Search index and upload this archive to the configured Azure Search resource. This may use Azure quota or create costs. Continue?',
-    );
-
-    if (!approved) {
-      return;
-    }
-
-    setMicrosoftIqActionState('indexing');
-    setGenerationNote('');
-
-    try {
-      const response = await fetch('/api/microsoft-iq/index', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(archivePayload),
-      });
-
-      const data = (await response.json()) as unknown;
-      if (!response.ok || !isRecord(data)) {
-        throw new Error('Microsoft IQ indexing failed.');
-      }
-
-      const chunkCount = Array.isArray(data.sourceChunks) ? data.sourceChunks.length : null;
-      const nextGroundingSources = Array.isArray(data.groundingSources) ? data.groundingSources.filter((item): item is string => typeof item === 'string') : [];
-      const nextCitations = Array.isArray(data.citations) ? data.citations.filter((item): item is string => typeof item === 'string') : [];
-
-      setIndexedSourceChunkCount(chunkCount);
-      setMicrosoftIqLayer('foundry-iq');
-      setMicrosoftIqMode(data.microsoftIqMode === 'live' ? 'live' : 'prepared');
-      setGroundingSources(nextGroundingSources);
-      setCitations(nextCitations);
-      if (cacheKey) {
-        window.sessionStorage.removeItem(cacheKey);
-      }
-
-      let refreshed: MuseumGenerationResponseBody | null = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        refreshed = await refreshMuseumPreview({ bypassCache: true });
-        if (refreshed?.microsoftIqMode === 'live') {
-          break;
-        }
-        if (attempt < 2) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1200));
-        }
-      }
-
-      setMicrosoftIqMode('live');
-      setMicrosoftIqActionState('success');
-      setGenerationNote(
-        refreshed?.microsoftIqMode === 'live'
-          ? 'Indexed successfully. Live grounding ready.'
-          : 'Indexed successfully. Live grounding ready in the Microsoft IQ layer.',
-      );
-    } catch (error) {
-      console.error('Microsoft IQ indexing failed in the browser:', error);
-      setMicrosoftIqActionState('failed');
-      setGenerationNote('Indexing failed.');
-    }
-  }
+  }, [archivePayload, archiveSignature, retryCount]);
 
   if (isResolvingPlace) {
-    return <LoadingShell placeName={loadingPlaceName} />;
-  }
-
-  if (!place) {
     return (
-      <ArchiveShell>
-        <InkPanel className="archive-not-found">
-          <p className="archive-kicker">AI Living Museum</p>
-          <h1>Museum preview not found.</h1>
-          <TornPaperButton href="/explore">Return to map</TornPaperButton>
-        </InkPanel>
+      <ArchiveShell hideTopbar className="archive-workspace--museum-detail">
+        <main className="museum-detail-page">
+          <section className="museum-detail-paper museum-detail-loading">
+            <p className="museum-detail-kicker">Opening exhibit</p>
+            <h1>Loading this place.</h1>
+          </section>
+        </main>
       </ArchiveShell>
     );
   }
 
-  if (!activeMuseum) {
-    return <LoadingShell placeName={place.name} />;
+  if (!place) {
+    return (
+      <ArchiveShell hideTopbar className="archive-workspace--museum-detail">
+        <main className="museum-detail-page">
+          <section className="museum-detail-paper museum-detail-loading">
+            <p className="museum-detail-kicker">Museum exhibit</p>
+            <h1>Place not found.</h1>
+            <p>This place is not saved in your museum yet.</p>
+            <Link className="museum-reference-open" href="/museum">
+              Museum <span>→</span>
+            </Link>
+          </section>
+        </main>
+      </ArchiveShell>
+    );
   }
 
-  const fallbackSources = ['Place metadata', 'Visitor memories', 'Photo captions', 'Voice transcripts', 'Moods'];
-  const visibleGroundingSources = groundingSources.length > 0 ? groundingSources : fallbackSources;
-  const visibleCitations =
-    citations.length > 0 ? citations : ['Prepared archive chunks are being used locally because no live Azure AI Search citations are available yet.'];
+  const latestMemory = localMemories[0];
+  const memoryTypes = getMemoryTypes(localMemories);
+  const sourcesUsed = getSourcesUsed(localMemories);
+  const summary = foundryStory?.summary ?? buildSummary(place, localMemories);
+  const summaryTitle = foundryStory?.title ?? (latestMemory ? getMemoryTitle(latestMemory) : 'This place is ready for memories.');
+  const storyMood = foundryStory?.mood ?? latestMemory?.mood ?? place.moods[0] ?? 'Calm';
+  const sourceLabels = foundryStory?.citations.length ? foundryStory.citations : sourcesUsed;
 
   return (
-    <ArchiveShell>
-      <section className="archive-museum-hero">
-        <TornPaperCard tone="light" className="archive-page-label">
-          <p className="archive-kicker">AI Living Museum</p>
-          <h1>{place.name}</h1>
-          <p>A generated exhibit shaped from place metadata, mock memories, browser-local memories, and Microsoft IQ grounding context.</p>
-          {place.origin === 'geoapify' ? <p>Opened from a live nearby place discovery.</p> : null}
-        </TornPaperCard>
-
-        <InkPanel className="archive-runtime-panel">
-          <ArchiveSectionHeader title={status.label} />
-          <p>{status.detail}</p>
-          <div className="archive-chip-row">
-            <span className="museum-plaque">{generationState === 'generated' ? 'Ready' : isGeneratingMuseum ? 'Working' : 'Static fallback'}</span>
-            <span className="museum-plaque">Runtime: {runtimeLabel}</span>
+    <ArchiveShell hideTopbar className="archive-workspace--museum-detail">
+      <main className="museum-detail-page">
+        <section className="museum-detail-paper museum-detail-hero">
+          <div>
+            <p className="museum-detail-kicker">Your Living Museum</p>
+            <h1>{place.name}</h1>
+            <p>{place.address}</p>
           </div>
-          {isGeneratingMuseum ? (
-            <div className="archive-curation-panel archive-curation-panel--inline">
-              <div className="archive-progress-label">
-                <span>Curating</span>
-                <span>68%</span>
-              </div>
-              <div className="ra-progress">
-                <span className="w-[68%]" />
-              </div>
+          <div className="museum-detail-actions">
+            <Link className="museum-reference-open" href="/museum">
+              Museum <span>→</span>
+            </Link>
+            <Link className="museum-reference-add" href={{ pathname: '/add-memory', query: { place: place.id } }}>
+              <span>＋</span> Add memory
+            </Link>
+          </div>
+        </section>
+
+        <section className="museum-detail-grid">
+          <article className="museum-detail-paper museum-detail-summary">
+            <div className="museum-detail-section-heading">
+              <p className="museum-detail-kicker">Foundry IQ Story</p>
+              <span className={`museum-detail-status museum-detail-status--${foundryStoryState}`}>
+                {getStoryStatusLabel(foundryStoryState, foundryStoryMode)}
+              </span>
             </div>
-          ) : null}
-          <div className="archive-chip-row">
-            {place.moods.map((mood) => (
-              <MoodBadge key={mood} mood={mood} />
+            <h2>{foundryStoryState === 'loading' ? 'Writing your museum story...' : summaryTitle}</h2>
+            <p>{foundryStoryState === 'loading' ? 'Foundry IQ is reading the place details, memory text, photo captions, and voice transcripts to write a grounded story.' : summary}</p>
+
+            {foundryStory?.memoryHighlights.length ? (
+              <div className="museum-detail-highlights">
+                {foundryStory.memoryHighlights.map((highlight) => (
+                  <span key={highlight}>{highlight}</span>
+                ))}
+              </div>
+            ) : null}
+
+            {foundryStoryState === 'error' ? (
+              <div className="museum-detail-story-alert">
+                <p>{foundryStoryError}</p>
+                <button type="button" onClick={() => setRetryCount((count) => count + 1)}>
+                  Retry Foundry IQ
+                </button>
+              </div>
+            ) : null}
+
+            <p className="museum-detail-muted">
+              {foundryStoryState === 'live'
+                ? 'Written live by Foundry IQ from your saved place details and memories.'
+                : foundryStoryState === 'prepared'
+                  ? foundryStoryReason || 'Foundry IQ was called, but the live story was not available, so a grounded fallback is shown.'
+                  : foundryStoryState === 'error'
+                    ? 'The local fallback remains visible until Foundry IQ returns a live story.'
+                    : 'Foundry IQ is creating the story from the context you saved.'}
+            </p>
+          </article>
+
+          <aside className="museum-detail-paper museum-detail-facts">
+            <p className="museum-detail-kicker">Exhibit details</p>
+            <dl>
+              <div>
+                <dt>Last remembered</dt>
+                <dd>{formatDate(latestMemory?.createdAt)}</dd>
+              </div>
+              <div>
+                <dt>Mood</dt>
+                <dd>{storyMood}</dd>
+              </div>
+              <div>
+                <dt>Category</dt>
+                <dd>{place.category}</dd>
+              </div>
+              <div>
+                <dt>Memory types</dt>
+                <dd>{memoryTypes.length > 0 ? memoryTypes.map(formatMemoryTypeLabel).join(', ') : 'None yet'}</dd>
+              </div>
+            </dl>
+          </aside>
+        </section>
+
+        <section className="museum-detail-memory-section">
+          <div className="museum-reference-section-title">
+            <h2>Saved Memories</h2>
+            <span />
+          </div>
+
+          {localMemories.length > 0 ? (
+            <div className="museum-detail-memory-grid">
+              {localMemories.map((memory) => (
+                <article key={memory.id} className="museum-detail-paper museum-detail-memory-card">
+                  <div className="museum-detail-memory-top">
+                    <span>{formatMemoryTypeLabel(memory.type)} memory</span>
+                    <time>{formatDate(memory.createdAt)}</time>
+                  </div>
+                  <h3>{getMemoryTitle(memory)}</h3>
+                  {memory.imageDataUrl ? <img src={memory.imageDataUrl} alt={memory.photoCaption || getMemoryTitle(memory)} /> : null}
+                  <p>{getMemoryBody(memory)}</p>
+                  <small>Mood: {memory.mood}</small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="museum-detail-paper museum-detail-empty">
+              <h3>No memories saved for this place yet.</h3>
+              <p>Add one memory to make the summary more personal.</p>
+              <Link className="museum-reference-add" href={{ pathname: '/add-memory', query: { place: place.id } }}>
+                <span>＋</span> Add memory
+              </Link>
+            </div>
+          )}
+        </section>
+
+        <section className="museum-detail-paper museum-detail-sources">
+          <p className="museum-detail-kicker">Sources used</p>
+          <div>
+            {sourceLabels.map((source) => (
+              <span key={source}>{source}</span>
             ))}
           </div>
-        </InkPanel>
-      </section>
-
-      <section className="archive-content-section">
-        <MicrosoftIqLedger
-          layer={microsoftIqLayer}
-          mode={microsoftIqMode}
-          provider={generationProvider}
-          sources={visibleGroundingSources}
-          citations={visibleCitations}
-          indexedSourceChunkCount={indexedSourceChunkCount}
-          status={
-            <div>
-              <p className="archive-kicker">{microsoftIqStatus.label}</p>
-              <p>{microsoftIqStatus.detail}</p>
-              <p>
-                {microsoftIqActionState === 'indexing'
-                  ? 'Indexing archive...'
-                  : microsoftIqActionState === 'success'
-                    ? 'Indexed successfully. Live grounding ready.'
-                    : microsoftIqActionState === 'failed'
-                      ? 'Indexing failed.'
-                      : microsoftIqConfigured
-                        ? 'Microsoft IQ configured. Ready to index the current archive.'
-                        : 'Setup needed before indexing can run.'}
-              </p>
-              {microsoftIqConfigured ? (
-                <p>
-                  Indexing writes this archive to the configured Azure AI Search resource and may use
-                  Azure quota or create costs. Use only demo-safe archive data.
-                </p>
-              ) : null}
-            </div>
-          }
-          action={
-            <TornPaperButton
-              onClick={() => {
-                void handleMicrosoftIqIndex();
-              }}
-              disabled={!microsoftIqConfigured || microsoftIqStatusState === 'loading' || microsoftIqActionState === 'indexing'}
-            >
-              {microsoftIqActionState === 'indexing' ? 'Indexing archive...' : 'Index archive for Microsoft IQ'}
-            </TornPaperButton>
-          }
-        />
-      </section>
-
-      <section className="archive-exhibit-grid">
-        <MuseumSection eyebrow="Living exhibit" title="What this place feels like" description={activeMuseum.livingExhibit} accent="amber" />
-        <MuseumSection eyebrow="Place mood" title="Current atmosphere" description={activeMuseum.placeMood} accent="emerald" />
-        <MuseumSection eyebrow="Memory wall summary" title="Why visitors remember it" description={activeMuseum.memoryWallSummary} accent="violet" />
-
-        <MuseumSection eyebrow="Voice tour script" title="Audio preview" description="A short guided sample generated from the backdrop of the place." accent="amber">
-          <ul className="archive-ledger-list">
-            {activeMuseum.voiceTourScript.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </MuseumSection>
-
-        <MuseumSection eyebrow="Visitor tips" title="How to explore it" description="Quick tips to make the visit feel richer." accent="emerald">
-          <ul className="archive-ledger-list">
-            {activeMuseum.visitorTips.map((tip) => (
-              <li key={tip}>{tip}</li>
-            ))}
-          </ul>
-        </MuseumSection>
-
-        <MuseumSection eyebrow="Mini quest" title={activeMuseum.miniQuest.title} description={activeMuseum.miniQuest.prompt} accent="violet">
-          <EmptyArchiveState icon="⌖" title="Quest reward" detail={activeMuseum.miniQuest.reward} />
-        </MuseumSection>
-
-        <MuseumSection eyebrow="Sources used" title="Archive references" description="The generated museum only uses the place archive that was provided for this page." accent="emerald">
-          <ul className="archive-ledger-list">
-            {activeMuseum.sourcesUsed.map((source) => (
-              <li key={source}>{source}</li>
-            ))}
-          </ul>
-        </MuseumSection>
-      </section>
-
-      <div className="archive-action-row">
-        <TornPaperButton href="/museum">
-          Back to museum
-        </TornPaperButton>
-        <TornPaperButton href={{ pathname: '/add-memory', query: { place: place.id } }} tone="dark">
-          Add another memory
-        </TornPaperButton>
-      </div>
+        </section>
+      </main>
     </ArchiveShell>
   );
 }

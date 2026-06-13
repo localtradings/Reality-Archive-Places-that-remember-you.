@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type {
   MicrosoftIqLayer,
   MicrosoftIqMode,
@@ -13,8 +15,11 @@ import {
 } from '@/lib/museum-collection';
 
 const AZURE_AI_SEARCH_API_VERSION = '2025-09-01';
-const AZURE_AI_AGENT_API_VERSION = '2025-05-01-preview';
+const AZURE_AI_AGENT_API_VERSION = normalizeText(process.env.AZURE_AI_AGENT_API_VERSION) || '2025-05-01';
+const AZURE_AI_INFERENCE_API_VERSION = normalizeText(process.env.AZURE_AI_INFERENCE_API_VERSION) || '2024-05-01-preview';
+const AZURE_AI_FOUNDRY_SCOPE = 'https://ai.azure.com/.default';
 const MICROSOFT_IQ_LAYER: MicrosoftIqLayer = 'foundry-iq';
+const execFileAsync = promisify(execFile);
 
 type ArchiveSourceKind = 'place-metadata' | 'visitor-memory' | 'photo-caption' | 'voice-transcript' | 'mood';
 
@@ -92,7 +97,13 @@ interface MicrosoftIqConfig extends MicrosoftIqConfigStatus {
 interface FoundryAgentConfig {
   projectEndpoint: string;
   agentId: string;
-  agentApiKey: string;
+  agentApiKey?: string;
+  authMode: 'azure-cli' | 'api-key';
+}
+
+interface FoundryChatDeployment {
+  endpoint: string;
+  model: string;
 }
 
 function normalizeText(value: unknown) {
@@ -106,6 +117,25 @@ function normalizeBooleanFlag(value: unknown) {
 
 function cleanEndpoint(value: string) {
   return value.replace(/\/+$/, '');
+}
+
+function deriveFoundryResourceEndpoint(projectEndpoint: string) {
+  try {
+    const url = new URL(projectEndpoint);
+    if (url.hostname.endsWith('.services.ai.azure.com') || url.hostname.endsWith('.cognitiveservices.azure.com')) {
+      return url.origin;
+    }
+  } catch {
+    return '';
+  }
+
+  const workspaceSegment = decodeURIComponent(projectEndpoint).match(/\/workspaces\/([^/?]+)/)?.[1];
+  const resourceName = workspaceSegment?.split('@')[0];
+  if (!resourceName) {
+    return '';
+  }
+
+  return `https://${resourceName}.services.ai.azure.com`;
 }
 
 function encodeDocumentKey(value: string) {
@@ -190,6 +220,7 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
   const projectEndpoint = normalizeText(process.env.AZURE_AI_PROJECT_ENDPOINT);
   const agentId = normalizeText(process.env.AZURE_AI_AGENT_ID);
   const agentApiKey = normalizeText(process.env.AZURE_AI_AGENT_API_KEY);
+  const agentUsesAzureCli = normalizeText(process.env.AZURE_AI_AGENT_AUTH_MODE).toLowerCase() !== 'api-key';
   const missingVariables = [
     !endpoint ? 'AZURE_AI_SEARCH_ENDPOINT' : '',
     !apiKey ? 'AZURE_AI_SEARCH_API_KEY' : '',
@@ -198,7 +229,7 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
   const missingAgentVariables = [
     !projectEndpoint ? 'AZURE_AI_PROJECT_ENDPOINT' : '',
     !agentId ? 'AZURE_AI_AGENT_ID' : '',
-    !agentApiKey ? 'AZURE_AI_AGENT_API_KEY' : '',
+    !agentUsesAzureCli && !agentApiKey ? 'AZURE_AI_AGENT_API_KEY' : '',
   ].filter((value) => value.length > 0);
 
   return {
@@ -229,15 +260,17 @@ function getFoundryAgentConfig(): FoundryAgentConfig | null {
   const projectEndpoint = cleanEndpoint(normalizeText(process.env.AZURE_AI_PROJECT_ENDPOINT));
   const agentId = normalizeText(process.env.AZURE_AI_AGENT_ID);
   const agentApiKey = normalizeText(process.env.AZURE_AI_AGENT_API_KEY);
+  const authMode = normalizeText(process.env.AZURE_AI_AGENT_AUTH_MODE).toLowerCase() === 'api-key' ? 'api-key' : 'azure-cli';
 
-  if (!projectEndpoint || !agentId || !agentApiKey) {
+  if (!projectEndpoint || !agentId || (authMode === 'api-key' && !agentApiKey)) {
     return null;
   }
 
   return {
     projectEndpoint,
     agentId,
-    agentApiKey,
+    agentApiKey: agentApiKey || undefined,
+    authMode,
   };
 }
 
@@ -320,7 +353,7 @@ export function buildMicrosoftIqArchiveDocument(payload: MuseumGenerationRequest
   });
 
   const document: MicrosoftIqArchiveDocument = {
-    id: `place-archive-${payload.place.id}`,
+    id: encodeDocumentKey(`place-archive-${payload.place.id}`),
     placeId: payload.place.id,
     placeName: payload.place.name,
     title: `${payload.place.name} archive`,
@@ -429,6 +462,7 @@ async function retrieveLiveSearchChunks(
         search: query,
         top: 5,
         count: true,
+        filter: `placeId eq '${payload.place.id.replace(/'/g, "''")}'`,
         queryType: 'simple',
         searchMode: 'any',
         searchFields: 'placeName,title,sourceLabel,content,searchableText,description,category',
@@ -618,15 +652,15 @@ function buildFoundryPrompt(payloads: MuseumGenerationRequestPayload[], chunksBy
   return JSON.stringify(
     {
       instruction:
-        'You are Reality Archive, a museum curator. Use only the provided archive and Azure AI Search grounding chunks. Return strict JSON only. Do not invent historical facts, dates, events, or claims that are not in the input.',
+        'You are Reality Archive, a museum curator. Use only the provided archive and Azure AI Search grounding chunks. Return strict JSON only. Write the summary as a warm museum story in real natural language, not a technical report. The summary must be one polished paragraph of about 80 to 140 words that weaves together the place details, text memories, photo captions, voice transcripts, mood, and category when they are available. Do not invent historical facts, dates, events, personal claims, objects, lighting, weather, sounds, sensory details, or scenes that are not explicitly supported by the input. If a detail is not written in the archive, leave it out. If the archive has no user memories yet, say that the exhibit is waiting for its first memory instead of making up a story.',
       requiredShape: {
         places: [
           {
             placeId: 'string',
-            title: 'string',
-            summary: 'string',
-            mood: 'string',
-            memoryHighlights: ['string'],
+            title: 'short exhibit title based on the place and memories',
+            summary: 'one story-like paragraph grounded only in the provided context',
+            mood: 'one mood word or short phrase grounded in the archive',
+            memoryHighlights: ['2 to 4 short grounded details that shaped the story'],
             citations: ['string'],
           },
         ],
@@ -704,14 +738,62 @@ function tryParseJsonFromText(value: string) {
   }
 }
 
+function getFoundryIqFailureReason(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes('Azure CLI token unavailable') || message.includes('az account get-access-token')) {
+    return 'Foundry IQ was called, but Azure CLI authentication is not available. Run az login, then refresh the museum page.';
+  }
+
+  if (message.includes('Azure AI Search index create/update failed') || message.includes('OperationNotAllowed')) {
+    return 'Foundry IQ was called, but Azure AI Search could not update the grounding index right now. A grounded story fallback is shown.';
+  }
+
+  if (message.includes('Azure AI Search document upload failed') || message.includes('Invalid document key')) {
+    return 'Foundry IQ was called, but Azure AI Search could not upload the archive documents. A grounded story fallback is shown.';
+  }
+
+  if (message.includes('does not have permissions') || message.includes('Forbidden')) {
+    return 'Foundry IQ was called and Azure AI Search was updated, but the configured Foundry Agent identity does not have permission to run. A grounded story fallback is shown until the Azure role is fixed.';
+  }
+
+  if (message.includes('API version not supported')) {
+    return 'Foundry IQ was called, but the configured Foundry Agent API version was rejected. A grounded story fallback is shown.';
+  }
+
+  return 'Foundry IQ live summaries failed, so a grounded story fallback is shown.';
+}
+
+async function getAzureCliFoundryAccessToken() {
+  try {
+    const { stdout } = await execFileAsync('az', ['account', 'get-access-token', '--scope', AZURE_AI_FOUNDRY_SCOPE, '--query', 'accessToken', '-o', 'tsv'], {
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    });
+    const token = normalizeText(stdout);
+    if (!token) {
+      throw new Error('Azure CLI returned an empty access token.');
+    }
+
+    return token;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Azure CLI token unavailable. Run az login and retry. Detail: ${detail}`);
+  }
+}
+
 async function foundryFetch(config: FoundryAgentConfig, path: string, init: RequestInit = {}) {
   const separator = path.includes('?') ? '&' : '?';
+  const authorization =
+    config.authMode === 'azure-cli'
+      ? `Bearer ${await getAzureCliFoundryAccessToken()}`
+      : `Bearer ${config.agentApiKey}`;
   const response = await fetch(`${config.projectEndpoint}${path}${separator}api-version=${AZURE_AI_AGENT_API_VERSION}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.agentApiKey}`,
-      'api-key': config.agentApiKey,
+      Authorization: authorization,
+      ...(config.authMode === 'api-key' && config.agentApiKey ? { 'api-key': config.agentApiKey } : {}),
       ...(init.headers ?? {}),
     },
     cache: 'no-store',
@@ -725,11 +807,108 @@ async function foundryFetch(config: FoundryAgentConfig, path: string, init: Requ
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+async function getFoundryChatDeployment(config: FoundryAgentConfig): Promise<FoundryChatDeployment> {
+  const configuredEndpoint = normalizeText(process.env.AZURE_AI_INFERENCE_ENDPOINT);
+  const endpoint = cleanEndpoint(configuredEndpoint || deriveFoundryResourceEndpoint(config.projectEndpoint));
+  if (!endpoint) {
+    throw new Error('Foundry model endpoint could not be inferred from AZURE_AI_PROJECT_ENDPOINT.');
+  }
+
+  const configuredModel = normalizeText(process.env.AZURE_AI_MODEL_DEPLOYMENT) || normalizeText(process.env.AZURE_OPENAI_DEPLOYMENT);
+  if (configuredModel) {
+    return {
+      endpoint,
+      model: configuredModel,
+    };
+  }
+
+  const response = await foundryFetch(config, '/deployments', {
+    method: 'GET',
+  });
+  const deployments = Array.isArray(response.value) ? response.value : [];
+  const chatDeployment = deployments.find((deployment) => {
+    if (!deployment || typeof deployment !== 'object') {
+      return false;
+    }
+
+    const capabilities = (deployment as Record<string, unknown>).capabilities;
+    return typeof capabilities === 'object' && capabilities !== null && (capabilities as Record<string, unknown>).chat_completion === 'true';
+  });
+
+  const model = chatDeployment && typeof chatDeployment === 'object' ? normalizeText((chatDeployment as Record<string, unknown>).name) : '';
+  if (!model) {
+    throw new Error('No Foundry chat model deployment is available for live story generation.');
+  }
+
+  return {
+    endpoint,
+    model,
+  };
+}
+
+async function runFoundryChatSummary(
+  config: FoundryAgentConfig,
+  payloads: MuseumGenerationRequestPayload[],
+  chunksByPlace: Map<string, MicrosoftIqSourceChunk[]>,
+) {
+  const deployment = await getFoundryChatDeployment(config);
+  const authorization =
+    config.authMode === 'azure-cli'
+      ? `Bearer ${await getAzureCliFoundryAccessToken()}`
+      : `Bearer ${config.agentApiKey}`;
+  const response = await fetch(`${deployment.endpoint}/models/chat/completions?api-version=${AZURE_AI_INFERENCE_API_VERSION}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: authorization,
+      ...(config.authMode === 'api-key' && config.agentApiKey ? { 'api-key': config.agentApiKey } : {}),
+    },
+    body: JSON.stringify({
+      model: deployment.model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are Reality Archive, a museum curator. Return strict JSON only. Use only the supplied archive context and citations. Do not add objects, lighting, weather, historical facts, or sensory details unless they are explicitly present in the input.',
+        },
+        {
+          role: 'user',
+          content: buildFoundryPrompt(payloads, chunksByPlace),
+        },
+      ],
+    }),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    const errorText = (await response.text()).slice(0, 800);
+    throw new Error(`Foundry model request failed with ${response.status}: ${errorText}`);
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const firstChoice = choices[0];
+  const message = firstChoice && typeof firstChoice === 'object' ? (firstChoice as Record<string, unknown>).message : null;
+  const content = message && typeof message === 'object' ? normalizeText((message as Record<string, unknown>).content) : '';
+  const parsed = tryParseJsonFromText(content);
+  const summaries = parsed ? normalizeFoundrySummary(parsed, payloads) : null;
+  if (!summaries) {
+    throw new Error('Foundry model returned an invalid summary shape.');
+  }
+
+  return summaries;
+}
+
 async function runFoundryAgentSummary(
   config: FoundryAgentConfig,
   payloads: MuseumGenerationRequestPayload[],
   chunksByPlace: Map<string, MicrosoftIqSourceChunk[]>,
 ) {
+  if (!config.agentId.startsWith('asst_')) {
+    return runFoundryChatSummary(config, payloads, chunksByPlace);
+  }
+
   const thread = await foundryFetch(config, '/threads', {
     method: 'POST',
     body: JSON.stringify({}),
@@ -751,7 +930,6 @@ async function runFoundryAgentSummary(
     method: 'POST',
     body: JSON.stringify({
       assistant_id: config.agentId,
-      agent_id: config.agentId,
     }),
   });
   const runId = normalizeText(run.id);
@@ -842,7 +1020,20 @@ export async function generateFoundryIqCollectionSummaries(payloads: MuseumGener
     };
   }
 
-  const indexResult = await indexMicrosoftIqCollection(payloads);
+  let indexResult: Awaited<ReturnType<typeof indexMicrosoftIqCollection>>;
+  try {
+    indexResult = await indexMicrosoftIqCollection(payloads);
+  } catch (error) {
+    console.error('Foundry IQ indexing failed:', error);
+    return {
+      mode: 'prepared',
+      provider: 'foundry-iq',
+      places: localPlaces,
+      sourceChunkCount: payloads.reduce((total, payload) => total + buildMicrosoftIqArchiveDocument(payload).sourceChunks.length, 0),
+      reason: getFoundryIqFailureReason(error),
+    };
+  }
+
   if (!agentConfig) {
     return {
       mode: 'prepared',
@@ -875,7 +1066,7 @@ export async function generateFoundryIqCollectionSummaries(payloads: MuseumGener
       places: localPlaces,
       sourceChunkCount: indexResult.sourceChunkCount,
       documentsUploaded: indexResult.documentsUploaded,
-      reason: 'Foundry IQ live summaries failed, so local summaries remain visible.',
+      reason: getFoundryIqFailureReason(error),
     };
   }
 }

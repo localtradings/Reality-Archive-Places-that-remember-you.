@@ -66,6 +66,16 @@ export async function POST(request: Request) {
     });
   }
 
-  const summaries = await generateFoundryIqCollectionSummaries(payloads);
-  return NextResponse.json(summaries);
+  try {
+    const summaries = await generateFoundryIqCollectionSummaries(payloads);
+    return NextResponse.json(summaries);
+  } catch (error) {
+    console.error('Foundry IQ summary route failed:', error);
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'Foundry IQ summary generation failed.',
+      },
+      { status: 500 },
+    );
+  }
 }
