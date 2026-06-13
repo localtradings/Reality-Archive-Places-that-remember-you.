@@ -180,6 +180,12 @@ export function HomeLanding() {
 
     return homepageFallbackCenter;
   }, [liveCenter, previewPlaces, rememberedPreview]);
+  const homeMapStatusState = liveCenter
+    ? 'live'
+    : mapStatus === 'Finding your location'
+      ? 'pending'
+      : 'inactive';
+  const homeMapStatusLabel = liveCenter ? 'Live · Updated' : mapStatus;
 
   return (
     <ArchiveShell className="archive-workspace--home" hideTopbar>
@@ -205,9 +211,15 @@ export function HomeLanding() {
 
         <section className="archive-home-map-card" aria-label="Map preview">
           <DiscoveryMap center={previewCenter} userCenter={liveCenter} places={previewPlaces} />
-          <div className="archive-home-map-caption">
-            <strong>{liveCenter ? 'Your location' : 'Location'}</strong>
-            <span>{mapStatus}</span>
+          <div
+            className="archive-home-map-caption"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            data-state={homeMapStatusState}
+          >
+            <span aria-hidden="true" />
+            {homeMapStatusLabel}
           </div>
         </section>
       </section>

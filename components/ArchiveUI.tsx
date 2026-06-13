@@ -1,16 +1,18 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import type { MicrosoftIqLayer, MicrosoftIqMode, MuseumGenerationProvider } from '@/lib/museum-generation';
+import logoMark from '@/reference/Logo.png';
 
 type Tone = 'dark' | 'light';
 
 const navItems = [
   { href: '/', label: 'Home', icon: '⌂', match: '/' },
   { href: '/explore', label: 'Explore', icon: '⌕', match: '/explore' },
-  { href: '/museum', label: 'Museum', icon: '⌂', match: '/museum' },
+  { href: '/museum', label: 'Museum', icon: '▥', match: '/museum' },
   { href: '/add-memory', label: 'My Memories', icon: '▣', match: '/add-memory' },
   { href: '/#about', label: 'About', icon: 'ⓘ', match: '/#about' },
 ];
@@ -46,8 +48,13 @@ export function ArchiveSidebar() {
   return (
     <aside className="archive-sidebar">
       <Link href="/" className="archive-brand">
-        <span className="archive-brand-title">Reality Archive</span>
-        <span className="archive-brand-tagline">Places that remember you.</span>
+        <span className="archive-brand-logo" aria-hidden="true">
+          <Image src={logoMark} alt="" priority sizes="44px" className="archive-brand-logo-image" />
+        </span>
+        <span className="archive-brand-copy">
+          <span className="archive-brand-title">Reality Archive</span>
+          <span className="archive-brand-tagline">Places that remember you.</span>
+        </span>
       </Link>
 
       <nav className="archive-side-nav" aria-label="Primary navigation">

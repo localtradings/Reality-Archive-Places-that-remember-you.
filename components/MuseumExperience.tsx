@@ -339,14 +339,6 @@ export function MuseumExperience() {
             <h1>{place.name}</h1>
             <p>{place.address}</p>
           </div>
-          <div className="museum-detail-actions">
-            <Link className="museum-reference-open" href="/museum">
-              Museum <span>→</span>
-            </Link>
-            <Link className="museum-reference-add" href={{ pathname: '/add-memory', query: { place: place.id } }}>
-              <span>＋</span> Add memory
-            </Link>
-          </div>
         </section>
 
         <section className="museum-detail-grid">
