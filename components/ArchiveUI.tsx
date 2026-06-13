@@ -1,11 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import type { MicrosoftIqLayer, MicrosoftIqMode, MuseumGenerationProvider } from '@/lib/museum-generation';
-import logoMark from '@/reference/Logo.png';
 
 type Tone = 'dark' | 'light';
 
@@ -49,7 +47,11 @@ export function ArchiveSidebar() {
     <aside className="archive-sidebar">
       <Link href="/" className="archive-brand">
         <span className="archive-brand-logo" aria-hidden="true">
-          <Image src={logoMark} alt="" priority sizes="44px" className="archive-brand-logo-image" />
+          <svg viewBox="0 0 64 64" className="archive-brand-logo-image">
+            <path d="M12 50V20l20-10 20 10v30" />
+            <path d="M20 50V25h24v25M27 50V34h10v16" />
+            <circle cx="32" cy="20" r="3" />
+          </svg>
         </span>
         <span className="archive-brand-copy">
           <span className="archive-brand-title">Reality Archive</span>

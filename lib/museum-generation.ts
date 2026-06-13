@@ -1,5 +1,5 @@
 import type { SavedMemory } from '@/lib/local-memory';
-import type { MemoryEntry, Mood, MuseumPreview, Place } from '@/types';
+import type { Mood, MuseumPreview, Place } from '@/types';
 
 export type MuseumMemoryType = 'text' | 'photo' | 'voice';
 export type MicrosoftIqLayer = 'foundry-iq';
@@ -133,18 +133,6 @@ export function normalizeMuseumGenerationPlaceInput(value: unknown): MuseumGener
   };
 }
 
-function buildMockMemoryInput(place: Place, memory: MemoryEntry): MuseumArchiveMemoryInput {
-  return {
-    id: memory.id,
-    origin: 'mock',
-    type: 'text',
-    title: memory.title,
-    text: memory.note,
-    tag: memory.tag,
-    placeName: place.name,
-  };
-}
-
 function buildLocalMemoryInput(memory: SavedMemory): MuseumArchiveMemoryInput {
   return {
     id: memory.id,
@@ -193,7 +181,7 @@ export function normalizeMuseumArchiveMemoryInput(value: unknown): MuseumArchive
 export function buildMuseumGenerationRequestPayload(place: Place, localMemories: SavedMemory[]): MuseumGenerationRequestPayload {
   return {
     place: buildMuseumGenerationPlaceInput(place),
-    memories: [...localMemories.map(buildLocalMemoryInput), ...place.memories.map((memory) => buildMockMemoryInput(place, memory))],
+    memories: localMemories.map(buildLocalMemoryInput),
     fallbackMuseum: place.museum,
   };
 }

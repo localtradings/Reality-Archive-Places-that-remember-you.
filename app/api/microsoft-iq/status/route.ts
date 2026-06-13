@@ -1,18 +1,21 @@
 import { NextResponse } from 'next/server';
 import { getMicrosoftIqConfigStatus } from '@/lib/microsoft-iq';
+import { getMicrosoftIqSessionFromRequest } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   const status = getMicrosoftIqConfigStatus();
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     enabled: status.enabled,
     configured: status.configured,
     agentConfigured: status.agentConfigured,
-    missingVariables: status.missingVariables,
-    missingAgentVariables: status.missingAgentVariables,
     indexNamePresent: status.indexNamePresent,
+    knowledgeBaseNamePresent: status.knowledgeBaseNamePresent,
+    authenticated: Boolean(getMicrosoftIqSessionFromRequest(request)),
   });
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }

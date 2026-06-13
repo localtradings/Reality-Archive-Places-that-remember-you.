@@ -8,6 +8,7 @@ import {
   type MuseumGenerationRequestPayload,
 } from '@/lib/museum-generation';
 import { generateFoundryIqCollectionSummaries, getMicrosoftIqConfigStatus } from '@/lib/microsoft-iq';
+import { authorizeMicrosoftIqRequest } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,14 +40,22 @@ function normalizePayload(value: unknown): MuseumGenerationRequestPayload | null
 }
 
 export async function POST(request: Request) {
-  let body: unknown;
-
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  const authorization = await authorizeMicrosoftIqRequest(request, {
+    maxBodyBytes: 256 * 1024,
+    rateLimit: { key: 'summaries', limit: 10, windowMs: 60_000 },
+    privacyConsentRequired: true,
+  });
+  if (!authorization.ok) {
+    return NextResponse.json(
+      { error: authorization.error },
+      {
+        status: authorization.status,
+        ...(authorization.retryAfterSeconds ? { headers: { 'Retry-After': String(authorization.retryAfterSeconds) } } : {}),
+      },
+    );
   }
 
+  const body = authorization.body;
   if (!isRecord(body) || !Array.isArray(body.places)) {
     return NextResponse.json({ error: 'Expected a places array.' }, { status: 400 });
   }

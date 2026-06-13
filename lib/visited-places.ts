@@ -12,12 +12,13 @@ export interface VisitedPlace {
   museum: Place['museum'];
   coordinates?: Place['coordinates'];
   origin?: Place['origin'];
+  isDemo?: boolean;
   firstVisitedAt: string;
   lastVisitedAt: string;
 }
 
 const VISITED_PLACES_STORAGE_KEY = 'reality-archive:visited-places:v1';
-const recordableMuseumOrigins = new Set<NonNullable<Place['origin']>>(['geoapify', 'search', 'manual']);
+const recordableMuseumOrigins = new Set<NonNullable<Place['origin']>>(['mock', 'geoapify', 'search', 'manual']);
 
 export function isRecordableMuseumPlace(place: Pick<Place, 'origin'>) {
   return Boolean(place.origin && recordableMuseumOrigins.has(place.origin));
@@ -90,6 +91,7 @@ export function recordVisitedPlace(place: Place, memoryCount = place.memoryCount
     museum: place.museum,
     coordinates: place.coordinates,
     origin: place.origin,
+    isDemo: place.isDemo,
     firstVisitedAt: existing?.firstVisitedAt ?? now,
     lastVisitedAt: now,
   };
@@ -112,5 +114,6 @@ export function visitedPlaceToPlace(place: VisitedPlace): Place {
     museum: place.museum,
     coordinates: place.coordinates,
     origin: place.origin,
+    isDemo: place.isDemo,
   };
 }

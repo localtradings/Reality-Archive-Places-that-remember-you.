@@ -3,6 +3,8 @@ import type { Place } from '@/types';
 export const mockPlaces: Place[] = [
   {
     id: 'iloilo-river-esplanade',
+    origin: 'mock',
+    isDemo: true,
     name: 'Iloilo River Esplanade',
     address: 'Iloilo City, Iloilo',
     category: 'Riverfront Walk',
@@ -34,6 +36,8 @@ export const mockPlaces: Place[] = [
   },
   {
     id: 'molo-mansion',
+    origin: 'mock',
+    isDemo: true,
     name: 'Molo Mansion',
     address: 'Molo, Iloilo City',
     category: 'Heritage House',
@@ -65,6 +69,8 @@ export const mockPlaces: Place[] = [
   },
   {
     id: 'jaro-cathedral',
+    origin: 'mock',
+    isDemo: true,
     name: 'Jaro Cathedral',
     address: 'Jaro, Iloilo City',
     category: 'Religious Landmark',
@@ -96,6 +102,8 @@ export const mockPlaces: Place[] = [
   },
   {
     id: 'calle-real',
+    origin: 'mock',
+    isDemo: true,
     name: 'Calle Real',
     address: 'Iloilo City Proper',
     category: 'Historic Street',
