@@ -6,8 +6,14 @@ import type {
   MuseumArchiveMemoryInput,
   MuseumGenerationRequestPayload,
 } from '@/lib/museum-generation';
+import {
+  buildLocalPlaceSummary,
+  type MuseumCollectionSummaryResponse,
+  type MuseumPlaceSummary,
+} from '@/lib/museum-collection';
 
 const AZURE_AI_SEARCH_API_VERSION = '2025-09-01';
+const AZURE_AI_AGENT_API_VERSION = '2025-05-01-preview';
 const MICROSOFT_IQ_LAYER: MicrosoftIqLayer = 'foundry-iq';
 
 type ArchiveSourceKind = 'place-metadata' | 'visitor-memory' | 'photo-caption' | 'voice-transcript' | 'mood';
@@ -15,7 +21,9 @@ type ArchiveSourceKind = 'place-metadata' | 'visitor-memory' | 'photo-caption' |
 export interface MicrosoftIqConfigStatus {
   enabled: boolean;
   configured: boolean;
+  agentConfigured: boolean;
   missingVariables: string[];
+  missingAgentVariables: string[];
   indexNamePresent: boolean;
 }
 
@@ -79,6 +87,12 @@ interface MicrosoftIqConfig extends MicrosoftIqConfigStatus {
   endpoint: string;
   apiKey: string;
   indexName: string;
+}
+
+interface FoundryAgentConfig {
+  projectEndpoint: string;
+  agentId: string;
+  agentApiKey: string;
 }
 
 function normalizeText(value: unknown) {
@@ -173,16 +187,26 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
   const endpoint = normalizeText(process.env.AZURE_AI_SEARCH_ENDPOINT);
   const apiKey = normalizeText(process.env.AZURE_AI_SEARCH_API_KEY);
   const indexName = normalizeText(process.env.AZURE_AI_SEARCH_INDEX_NAME);
+  const projectEndpoint = normalizeText(process.env.AZURE_AI_PROJECT_ENDPOINT);
+  const agentId = normalizeText(process.env.AZURE_AI_AGENT_ID);
+  const agentApiKey = normalizeText(process.env.AZURE_AI_AGENT_API_KEY);
   const missingVariables = [
     !endpoint ? 'AZURE_AI_SEARCH_ENDPOINT' : '',
     !apiKey ? 'AZURE_AI_SEARCH_API_KEY' : '',
     !indexName ? 'AZURE_AI_SEARCH_INDEX_NAME' : '',
   ].filter((value) => value.length > 0);
+  const missingAgentVariables = [
+    !projectEndpoint ? 'AZURE_AI_PROJECT_ENDPOINT' : '',
+    !agentId ? 'AZURE_AI_AGENT_ID' : '',
+    !agentApiKey ? 'AZURE_AI_AGENT_API_KEY' : '',
+  ].filter((value) => value.length > 0);
 
   return {
     enabled,
     configured: missingVariables.length === 0,
+    agentConfigured: missingAgentVariables.length === 0,
     missingVariables,
+    missingAgentVariables,
     indexNamePresent: indexName.length > 0,
   };
 }
@@ -198,6 +222,22 @@ function getMicrosoftIqConfig(): MicrosoftIqConfig {
     endpoint,
     apiKey,
     indexName,
+  };
+}
+
+function getFoundryAgentConfig(): FoundryAgentConfig | null {
+  const projectEndpoint = cleanEndpoint(normalizeText(process.env.AZURE_AI_PROJECT_ENDPOINT));
+  const agentId = normalizeText(process.env.AZURE_AI_AGENT_ID);
+  const agentApiKey = normalizeText(process.env.AZURE_AI_AGENT_API_KEY);
+
+  if (!projectEndpoint || !agentId || !agentApiKey) {
+    return null;
+  }
+
+  return {
+    projectEndpoint,
+    agentId,
+    agentApiKey,
   };
 }
 
@@ -433,6 +473,24 @@ async function retrieveLiveSearchChunks(
     .filter((chunk): chunk is MicrosoftIqSourceChunk => chunk !== null);
 }
 
+async function retrieveLiveSearchChunksForPayloads(
+  config: MicrosoftIqConfig,
+  payloads: MuseumGenerationRequestPayload[],
+): Promise<Map<string, MicrosoftIqSourceChunk[]>> {
+  const result = new Map<string, MicrosoftIqSourceChunk[]>();
+
+  for (const payload of payloads) {
+    try {
+      result.set(payload.place.id, await retrieveLiveSearchChunks(config, payload));
+    } catch (error) {
+      console.error(`Microsoft IQ retrieval failed for ${payload.place.id}:`, error);
+      result.set(payload.place.id, []);
+    }
+  }
+
+  return result;
+}
+
 export async function buildMicrosoftIqGroundingContext(payload: MuseumGenerationRequestPayload): Promise<MicrosoftIqGroundingContext> {
   const config = getMicrosoftIqConfig();
   const archive = buildMicrosoftIqArchiveDocument(payload);
@@ -529,4 +587,295 @@ export async function uploadMicrosoftIqArchiveDocuments(indexName: string, docum
     status: 'live' as const,
     reason: undefined,
   };
+}
+
+export async function indexMicrosoftIqCollection(payloads: MuseumGenerationRequestPayload[]) {
+  const config = getMicrosoftIqConfig();
+  if (!config.enabled || !config.configured) {
+    return {
+      status: 'prepared' as const,
+      indexCreated: false,
+      documentsUploaded: 0,
+      sourceChunkCount: payloads.reduce((total, payload) => total + buildMicrosoftIqArchiveDocument(payload).sourceChunks.length, 0),
+      reason: 'Microsoft IQ search is not fully configured.',
+    };
+  }
+
+  const indexResult = await ensureMicrosoftIqSearchIndex(config.indexName);
+  const documents = payloads.flatMap((payload) => buildMicrosoftIqIndexDocuments(payload).documents);
+  const uploadResult = await uploadMicrosoftIqArchiveDocuments(config.indexName, documents);
+
+  return {
+    status: 'live' as const,
+    indexCreated: indexResult.created,
+    documentsUploaded: uploadResult.uploaded,
+    sourceChunkCount: documents.length,
+    reason: undefined,
+  };
+}
+
+function buildFoundryPrompt(payloads: MuseumGenerationRequestPayload[], chunksByPlace: Map<string, MicrosoftIqSourceChunk[]>) {
+  return JSON.stringify(
+    {
+      instruction:
+        'You are Reality Archive, a museum curator. Use only the provided archive and Azure AI Search grounding chunks. Return strict JSON only. Do not invent historical facts, dates, events, or claims that are not in the input.',
+      requiredShape: {
+        places: [
+          {
+            placeId: 'string',
+            title: 'string',
+            summary: 'string',
+            mood: 'string',
+            memoryHighlights: ['string'],
+            citations: ['string'],
+          },
+        ],
+      },
+      places: payloads.map((payload) => ({
+        place: payload.place,
+        memories: payload.memories,
+        fallbackMuseum: payload.fallbackMuseum,
+        groundingChunks: chunksByPlace.get(payload.place.id) ?? [],
+      })),
+    },
+    null,
+    2,
+  );
+}
+
+function normalizeFoundrySummary(value: unknown, payloads: MuseumGenerationRequestPayload[]): MuseumPlaceSummary[] | null {
+  const record = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+  const rawPlaces = Array.isArray(record?.places) ? record.places : null;
+  if (!rawPlaces) {
+    return null;
+  }
+
+  const validPlaceIds = new Set(payloads.map((payload) => payload.place.id));
+  const summaries = rawPlaces
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const row = item as Record<string, unknown>;
+      const placeId = normalizeText(row.placeId);
+      const title = normalizeText(row.title);
+      const summary = normalizeText(row.summary);
+      const mood = normalizeText(row.mood);
+      const memoryHighlights = Array.isArray(row.memoryHighlights)
+        ? row.memoryHighlights.map(normalizeText).filter((value) => value.length > 0).slice(0, 4)
+        : [];
+      const citations = Array.isArray(row.citations)
+        ? row.citations.map(normalizeText).filter((value) => value.length > 0).slice(0, 8)
+        : [];
+
+      if (!validPlaceIds.has(placeId) || !title || !summary || !mood) {
+        return null;
+      }
+
+      return {
+        placeId,
+        title,
+        summary,
+        mood,
+        memoryHighlights,
+        citations,
+      } satisfies MuseumPlaceSummary;
+    })
+    .filter((item): item is MuseumPlaceSummary => item !== null);
+
+  return summaries.length > 0 ? summaries : null;
+}
+
+function tryParseJsonFromText(value: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    const match = value.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(match[0]) as unknown;
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function foundryFetch(config: FoundryAgentConfig, path: string, init: RequestInit = {}) {
+  const separator = path.includes('?') ? '&' : '?';
+  const response = await fetch(`${config.projectEndpoint}${path}${separator}api-version=${AZURE_AI_AGENT_API_VERSION}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.agentApiKey}`,
+      'api-key': config.agentApiKey,
+      ...(init.headers ?? {}),
+    },
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    const errorText = (await response.text()).slice(0, 800);
+    throw new Error(`Foundry Agent request failed with ${response.status}: ${errorText}`);
+  }
+
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+async function runFoundryAgentSummary(
+  config: FoundryAgentConfig,
+  payloads: MuseumGenerationRequestPayload[],
+  chunksByPlace: Map<string, MicrosoftIqSourceChunk[]>,
+) {
+  const thread = await foundryFetch(config, '/threads', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  const threadId = normalizeText(thread.id);
+  if (!threadId) {
+    throw new Error('Foundry Agent did not return a thread id.');
+  }
+
+  await foundryFetch(config, `/threads/${encodeURIComponent(threadId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      role: 'user',
+      content: buildFoundryPrompt(payloads, chunksByPlace),
+    }),
+  });
+
+  const run = await foundryFetch(config, `/threads/${encodeURIComponent(threadId)}/runs`, {
+    method: 'POST',
+    body: JSON.stringify({
+      assistant_id: config.agentId,
+      agent_id: config.agentId,
+    }),
+  });
+  const runId = normalizeText(run.id);
+  if (!runId) {
+    throw new Error('Foundry Agent did not return a run id.');
+  }
+
+  let status = normalizeText(run.status);
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    if (status === 'completed') {
+      break;
+    }
+
+    if (status === 'failed' || status === 'cancelled' || status === 'expired') {
+      throw new Error(`Foundry Agent run ended with status: ${status}.`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1250));
+    const nextRun = await foundryFetch(config, `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}`, {
+      method: 'GET',
+    });
+    status = normalizeText(nextRun.status);
+  }
+
+  if (status !== 'completed') {
+    throw new Error('Foundry Agent summary timed out.');
+  }
+
+  const messages = await foundryFetch(config, `/threads/${encodeURIComponent(threadId)}/messages`, {
+    method: 'GET',
+  });
+  const rawMessages = Array.isArray(messages.data) ? messages.data : Array.isArray(messages.value) ? messages.value : [];
+  const assistantMessage = rawMessages.find((message) => {
+    if (!message || typeof message !== 'object') {
+      return false;
+    }
+
+    return (message as Record<string, unknown>).role === 'assistant';
+  });
+
+  if (!assistantMessage || typeof assistantMessage !== 'object') {
+    throw new Error('Foundry Agent did not return an assistant message.');
+  }
+
+  const content = (assistantMessage as Record<string, unknown>).content;
+  const textParts = Array.isArray(content)
+    ? content
+        .map((part) => {
+          if (!part || typeof part !== 'object') {
+            return '';
+          }
+
+          const record = part as Record<string, unknown>;
+          if (typeof record.text === 'string') {
+            return record.text;
+          }
+
+          if (record.text && typeof record.text === 'object' && typeof (record.text as Record<string, unknown>).value === 'string') {
+            return (record.text as Record<string, unknown>).value as string;
+          }
+
+          return '';
+        })
+        .filter((value) => value.length > 0)
+    : [normalizeText(content)];
+
+  const parsed = tryParseJsonFromText(textParts.join('\n'));
+  const summaries = parsed ? normalizeFoundrySummary(parsed, payloads) : null;
+  if (!summaries) {
+    throw new Error('Foundry Agent returned an invalid summary shape.');
+  }
+
+  return summaries;
+}
+
+export async function generateFoundryIqCollectionSummaries(payloads: MuseumGenerationRequestPayload[]): Promise<MuseumCollectionSummaryResponse> {
+  const config = getMicrosoftIqConfig();
+  const agentConfig = getFoundryAgentConfig();
+  const localPlaces = payloads.map(buildLocalPlaceSummary);
+
+  if (!config.enabled || !config.configured) {
+    return {
+      mode: 'prepared',
+      provider: 'foundry-iq',
+      places: localPlaces,
+      sourceChunkCount: payloads.reduce((total, payload) => total + buildMicrosoftIqArchiveDocument(payload).sourceChunks.length, 0),
+      reason: 'Azure AI Search is not fully configured, so local summaries remain visible.',
+    };
+  }
+
+  const indexResult = await indexMicrosoftIqCollection(payloads);
+  if (!agentConfig) {
+    return {
+      mode: 'prepared',
+      provider: 'foundry-iq',
+      places: localPlaces,
+      sourceChunkCount: indexResult.sourceChunkCount,
+      documentsUploaded: indexResult.documentsUploaded,
+      reason: 'Azure AI Search indexing is available, but Foundry Agent configuration is missing.',
+    };
+  }
+
+  try {
+    const chunksByPlace = await retrieveLiveSearchChunksForPayloads(config, payloads);
+    const summaries = await runFoundryAgentSummary(agentConfig, payloads, chunksByPlace);
+    const sourceChunkCount = Array.from(chunksByPlace.values()).reduce((total, chunks) => total + chunks.length, 0);
+
+    return {
+      mode: 'live',
+      provider: 'foundry-iq',
+      places: summaries,
+      sourceChunkCount,
+      documentsUploaded: indexResult.documentsUploaded,
+      reason: undefined,
+    };
+  } catch (error) {
+    console.error('Foundry IQ summary generation failed:', error);
+    return {
+      mode: 'prepared',
+      provider: 'foundry-iq',
+      places: localPlaces,
+      sourceChunkCount: indexResult.sourceChunkCount,
+      documentsUploaded: indexResult.documentsUploaded,
+      reason: 'Foundry IQ live summaries failed, so local summaries remain visible.',
+    };
+  }
 }

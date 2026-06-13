@@ -1,0 +1,90 @@
+<h2>Homepage Rethink Directions</h2>
+<p class="subtitle">Goal: make the app understandable at a glance without adding a tutorial or a big new flow.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option A · Explore First</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Reality Archive | Explore | My Places | Museum</div>
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px;">
+            <div class="placeholder" style="min-height:260px;">Live map dominates the first screen</div>
+            <div style="display:grid;gap:12px;">
+              <div class="placeholder" style="min-height:90px;">Nearby place card</div>
+              <div class="placeholder" style="min-height:90px;">Saved memory preview</div>
+              <button class="mock-button">Start exploring nearby</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Explore First</h3>
+      <p>The homepage immediately feels like a map product. Best if discovery is the true main action.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Fastest to understand</li><li>Strong product identity</li><li>Makes “what do I do?” obvious</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Home and Explore become very close</li><li>Slightly bigger homepage change</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option B · Preview Then Enter</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Reality Archive | Explore | My Places | Museum</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div>
+              <h3 style="margin:0 0 8px 0;">Explore nearby places and turn them into memories.</h3>
+              <p class="subtitle" style="margin:0 0 12px 0;">A cleaner homepage that shows the product clearly without turning Home into the full map screen.</p>
+              <button class="mock-button">Open live map</button>
+            </div>
+            <div class="placeholder" style="min-height:220px;">Strong map + place preview panel</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;">
+            <div class="placeholder" style="min-height:74px;">1. Discover</div>
+            <div class="placeholder" style="min-height:74px;">2. Save memory</div>
+            <div class="placeholder" style="min-height:74px;">3. View museum</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Preview Then Enter</h3>
+      <p>Recommended. The homepage explains the product through visual hierarchy, then pushes one clear action into Explore.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Keeps Home and Explore distinct</li><li>Very understandable</li><li>Moderate implementation size</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Less bold than a map-first homepage</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option C · Archive + Museum Split</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Reality Archive | Explore | My Places | Museum</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div class="placeholder" style="min-height:240px;">Archive side: places and memories</div>
+            <div class="placeholder" style="min-height:240px;">Museum side: AI exhibit preview</div>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:14px;">
+            <button class="mock-button">Explore places</button>
+            <button class="mock-button">Open museum</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Archive + Museum Split</h3>
+      <p>Explains both halves of the product, but it risks keeping the user unsure about which action matters most.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Shows the full idea</li><li>Feels richer and more editorial</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Still more ambiguous</li><li>Weaker primary action</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,4 +1,14 @@
-export type Mood = 'Historic' | 'Calm' | 'Romantic' | 'Colorful' | 'Spiritual' | 'Energetic';
+export type Mood =
+  | 'Historic'
+  | 'Calm'
+  | 'Romantic'
+  | 'Colorful'
+  | 'Spiritual'
+  | 'Energetic'
+  | 'Nostalgic'
+  | 'Joyful'
+  | 'Peaceful'
+  | 'Reflective';
 
 export interface MemoryEntry {
   id: string;

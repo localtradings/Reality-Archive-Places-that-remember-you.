@@ -7,11 +7,15 @@ export interface SavedMemory {
   placeId: string;
   placeName: string;
   type: MemoryType;
+  title?: string;
   mood: Mood;
   text: string;
   photoCaption?: string;
   imageDataUrl?: string;
   voiceTranscript?: string;
+  voiceRecordingId?: string;
+  voiceDurationSeconds?: number;
+  voiceMimeType?: string;
   createdAt: string;
 }
 

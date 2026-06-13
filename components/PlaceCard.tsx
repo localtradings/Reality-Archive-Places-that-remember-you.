@@ -5,7 +5,7 @@ import { MoodBadge } from './MoodBadge';
 export function PlaceCard({ place }: { place: Place }) {
   return (
     <Link
-      href={`/place/${place.id}`}
+      href={{ pathname: '/add-memory', query: { place: place.id } }}
       className="torn-paper torn-paper-dark archive-place-card group"
     >
       <div className="archive-card-meta">
@@ -26,7 +26,7 @@ export function PlaceCard({ place }: { place: Place }) {
       </div>
 
       <div className="archive-card-footer">
-        <span>Open archive</span>
+        <span>Add memory</span>
         <span aria-hidden="true">→</span>
       </div>
     </Link>

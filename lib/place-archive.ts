@@ -10,6 +10,8 @@ export interface GeoapifyNearbyPlace {
   distanceMeters?: number;
 }
 
+export type TemporaryPlaceOrigin = 'geoapify' | 'search' | 'manual';
+
 const TEMP_PLACE_STORAGE_PREFIX = 'reality-archive:temp-place:';
 
 function slugify(value: string) {
@@ -82,7 +84,55 @@ export function formatGeoapifyCategoryLabel(category: string) {
     .join(' · ');
 }
 
-function buildTemporaryMuseum(place: GeoapifyNearbyPlace): MuseumPreview {
+function buildTemporaryMuseum(place: GeoapifyNearbyPlace, origin: TemporaryPlaceOrigin): MuseumPreview {
+  if (origin === 'search') {
+    return {
+      livingExhibit: `${place.name} was found by name and prepared as a remembered-place archive preview.`,
+      placeMood: `Search result category: ${place.category}. Coordinates: ${place.latitude.toFixed(4)}, ${place.longitude.toFixed(4)}.`,
+      memoryWallSummary: 'No saved memories yet. This place was added from search so you can start building its archive.',
+      voiceTourScript: [
+        `This archive began with a remembered-place search for ${place.name}.`,
+        'Use the place page to confirm it feels right, then add a memory to make it personal.',
+        'The museum will treat it like any other place in your archive once you save it.',
+      ],
+      visitorTips: [
+        'Open the archive to confirm the place details feel correct.',
+        'Add one memory to turn this result into part of your personal collection.',
+        'Return to Explore if you want to search for another remembered place.',
+      ],
+      miniQuest: {
+        title: 'Remembered place',
+        prompt: 'Write down the first detail you still remember about this place.',
+        reward: 'A remembered-place bookmark.',
+      },
+      sourcesUsed: ['Geoapify geocoding search', 'Client-side remembered place preview'],
+    };
+  }
+
+  if (origin === 'manual') {
+    return {
+      livingExhibit: `${place.name} was added manually as a place you remember and is ready for memories and museum summaries.`,
+      placeMood: `Manual archive category: ${place.category}. Coordinates: ${place.latitude.toFixed(4)}, ${place.longitude.toFixed(4)}.`,
+      memoryWallSummary: 'No saved memories yet. This archive was created manually so you can preserve a place from memory.',
+      voiceTourScript: [
+        `This is a manually added archive for ${place.name}.`,
+        'It exists so remembered places from years ago can still become part of your collection.',
+        'Add a memory when you are ready to give the archive its first story.',
+      ],
+      visitorTips: [
+        'Use the archive page to check the name, address, and category feel right.',
+        'Add a memory to explain why this place matters to you.',
+        'Open the museum later to see it appear beside your other places.',
+      ],
+      miniQuest: {
+        title: 'Memory anchor',
+        prompt: 'Capture one detail that proves this place still lives in your memory.',
+        reward: 'A memory anchor stamp.',
+      },
+      sourcesUsed: ['Manual place entry', 'Client-side remembered place preview'],
+    };
+  }
+
   return {
     livingExhibit: `A live nearby discovery pulled from Geoapify for ${place.name}. This archive is temporary, but it already gives the place a clear museum voice.`,
     placeMood: `Live category: ${place.category}. Coordinates: ${place.latitude.toFixed(4)}, ${place.longitude.toFixed(4)}.`,
@@ -95,7 +145,7 @@ function buildTemporaryMuseum(place: GeoapifyNearbyPlace): MuseumPreview {
     visitorTips: [
       'Use the map to see how close this place is to your current location.',
       'Treat this as a temporary archive entry until the app stores it permanently.',
-      'Return to Explore to compare it with the curated Iloilo landmarks.',
+      'Return to Explore to discover more places for your personal museum.',
     ],
     miniQuest: {
       title: 'Temporary archive',
@@ -106,22 +156,29 @@ function buildTemporaryMuseum(place: GeoapifyNearbyPlace): MuseumPreview {
   };
 }
 
-export function buildTemporaryPlace(place: GeoapifyNearbyPlace): Place {
+export function buildTemporaryPlace(place: GeoapifyNearbyPlace, origin: TemporaryPlaceOrigin = 'geoapify'): Place {
+  const description =
+    origin === 'search'
+      ? `A remembered place found from search in ${place.category}.`
+      : origin === 'manual'
+        ? `A remembered place you added manually under ${place.category}.`
+        : `A live nearby place discovered from ${place.category}.`;
+
   return {
     id: place.id,
     name: place.name,
     address: place.address,
     category: place.category,
-    description: `A live nearby place discovered from ${place.category}.`,
+    description,
     memoryCount: 0,
     moods: [deriveMood(place.category)],
     memories: [],
-    museum: buildTemporaryMuseum(place),
+    museum: buildTemporaryMuseum(place, origin),
     coordinates: {
       latitude: place.latitude,
       longitude: place.longitude,
     },
-    origin: 'geoapify',
+    origin,
   };
 }
 
@@ -160,6 +217,7 @@ export function buildGeoapifyPlaceFromSearchParams(searchParams: URLSearchParams
   const category = searchParams.get('category');
   const latitude = searchParams.get('latitude');
   const longitude = searchParams.get('longitude');
+  const source = searchParams.get('source');
 
   if (!name || !address || !category || !latitude || !longitude) {
     return null;
@@ -186,5 +244,5 @@ export function buildGeoapifyPlaceFromSearchParams(searchParams: URLSearchParams
     category,
     latitude: parsedLatitude,
     longitude: parsedLongitude,
-  });
+  }, source === 'manual' || source === 'search' ? source : 'geoapify');
 }

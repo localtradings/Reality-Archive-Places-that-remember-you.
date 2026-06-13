@@ -10,6 +10,15 @@ export interface GeoapifyPlacesOptions {
   center: GeoapifySearchCenter;
   radiusMeters?: number;
   limit?: number;
+  signal?: AbortSignal;
+}
+
+export interface GeoapifyPlaceSearchOptions {
+  apiKey: string;
+  text: string;
+  center?: GeoapifySearchCenter;
+  limit?: number;
+  signal?: AbortSignal;
 }
 
 type GeoapifyDiscoveryQuery = {
@@ -54,7 +63,7 @@ function normalizePlace(feature: GeoapifyFeature): GeoapifyNearbyPlace | null {
   const addressLine1 = asString(properties.address_line1);
   const addressLine2 = asString(properties.address_line2);
   const formatted = asString(properties.formatted);
-  const address = [addressLine1, addressLine2].filter(Boolean).join(', ') || formatted || 'Iloilo City';
+  const address = [addressLine1, addressLine2].filter(Boolean).join(', ') || formatted || 'Unknown address';
   const category = categories[0] || asString(properties.category) || 'tourism';
   const distanceMeters = asNumber(properties.distance) ?? undefined;
   const rawId = asString(properties.place_id) || String(feature.id ?? '');
@@ -96,6 +105,7 @@ async function fetchGeoapifyPlacesForQuery(
   radiusMeters: number,
   limit: number,
   query: GeoapifyDiscoveryQuery,
+  signal?: AbortSignal,
 ) {
   const url = new URL('https://api.geoapify.com/v2/places');
   url.searchParams.set('apiKey', apiKey);
@@ -108,6 +118,7 @@ async function fetchGeoapifyPlacesForQuery(
   const response = await fetch(url.toString(), {
     method: 'GET',
     cache: 'no-store',
+    signal,
   });
 
   if (!response.ok) {
@@ -138,9 +149,10 @@ export async function fetchGeoapifyNearbyPlaces({
   center,
   radiusMeters = 5000,
   limit = 8,
+  signal,
 }: GeoapifyPlacesOptions) {
   const results = await Promise.allSettled(
-    discoveryQueries.map((query) => fetchGeoapifyPlacesForQuery(apiKey, center, radiusMeters, limit, query)),
+    discoveryQueries.map((query) => fetchGeoapifyPlacesForQuery(apiKey, center, radiusMeters, limit, query, signal)),
   );
 
   const byId = new Map<string, GeoapifyNearbyPlace & { discoveryPriority: number }>();
@@ -186,16 +198,96 @@ export async function fetchGeoapifyNearbyPlaces({
 
   return Array.from(byId.values())
     .sort((a, b) => {
-      if (a.discoveryPriority !== b.discoveryPriority) {
-        return b.discoveryPriority - a.discoveryPriority;
+      const distanceA =
+        typeof a.distanceMeters === 'number' && Number.isFinite(a.distanceMeters)
+          ? a.distanceMeters
+          : Number.POSITIVE_INFINITY;
+      const distanceB =
+        typeof b.distanceMeters === 'number' && Number.isFinite(b.distanceMeters)
+          ? b.distanceMeters
+          : Number.POSITIVE_INFINITY;
+
+      if (distanceA !== distanceB) {
+        return distanceA - distanceB;
       }
 
-      if (typeof a.distanceMeters === 'number' && typeof b.distanceMeters === 'number') {
-        return a.distanceMeters - b.distanceMeters;
+      if (a.discoveryPriority !== b.discoveryPriority) {
+        return b.discoveryPriority - a.discoveryPriority;
       }
 
       return a.name.localeCompare(b.name);
     })
     .slice(0, limit)
     .map(({ discoveryPriority: _discoveryPriority, ...place }) => place);
+}
+
+type GeoapifyGeocodeResult = {
+  place_id?: string;
+  name?: string;
+  address_line1?: string;
+  address_line2?: string;
+  formatted?: string;
+  result_type?: string;
+  category?: string;
+  lat?: number;
+  lon?: number;
+};
+
+export async function searchGeoapifyPlacesByText({
+  apiKey,
+  text,
+  center,
+  limit = 5,
+  signal,
+}: GeoapifyPlaceSearchOptions) {
+  const query = text.trim();
+  if (!query) {
+    return [] as GeoapifyNearbyPlace[];
+  }
+
+  const url = new URL('https://api.geoapify.com/v1/geocode/autocomplete');
+  url.searchParams.set('apiKey', apiKey);
+  url.searchParams.set('text', query);
+  url.searchParams.set('limit', String(limit));
+  url.searchParams.set('lang', 'en');
+
+  if (center) {
+    url.searchParams.set('bias', `proximity:${center.longitude},${center.latitude}`);
+  }
+
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    cache: 'no-store',
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Geoapify search failed with status ${response.status}`);
+  }
+
+  const data = (await response.json()) as { results?: GeoapifyGeocodeResult[] };
+
+  return (data.results ?? [])
+    .map((result) => {
+      const latitude = asNumber(result.lat);
+      const longitude = asNumber(result.lon);
+      if (latitude === null || longitude === null) {
+        return null;
+      }
+
+      const name = asString(result.name) || asString(result.address_line1) || asString(result.formatted) || query;
+      const address = [asString(result.address_line1), asString(result.address_line2)].filter(Boolean).join(', ') || asString(result.formatted) || 'Unknown address';
+      const category = asString(result.category) || asString(result.result_type) || 'remembered place';
+      const id = asString(result.place_id) || `${name}-${latitude.toFixed(4)}-${longitude.toFixed(4)}`;
+
+      return {
+        id,
+        name,
+        address,
+        category,
+        latitude,
+        longitude,
+      } satisfies GeoapifyNearbyPlace;
+    })
+    .filter((place): place is GeoapifyNearbyPlace => place !== null);
 }

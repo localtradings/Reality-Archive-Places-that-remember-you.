@@ -2,9 +2,9 @@ import type { SavedMemory } from '@/lib/local-memory';
 import type { MemoryEntry, Mood, MuseumPreview, Place } from '@/types';
 
 export type MuseumMemoryType = 'text' | 'photo' | 'voice';
-export type MuseumGenerationProvider = 'azure' | 'openai' | 'fallback';
 export type MicrosoftIqLayer = 'foundry-iq';
 export type MicrosoftIqMode = 'live' | 'prepared';
+export type MuseumGenerationProvider = MicrosoftIqLayer | 'fallback';
 
 export interface MuseumArchiveMemoryInput {
   id: string;
@@ -40,7 +40,7 @@ export interface MuseumGenerationRequestPayload {
 export interface MuseumGenerationResponseBody {
   generated: boolean;
   museum: MuseumPreview;
-  source: 'azure' | 'openai' | 'fallback';
+  source: MicrosoftIqLayer | 'fallback';
   provider: MuseumGenerationProvider;
   microsoftIqLayer: MicrosoftIqLayer;
   microsoftIqMode: MicrosoftIqMode;
@@ -283,7 +283,7 @@ export function buildArchivePromptLines(memories: MuseumArchiveMemoryInput[]) {
 
 export function buildMuseumGenerationInstructions() {
   return [
-    'You are Reality Archive, a mobile museum curator for Iloilo places.',
+    'You are Reality Archive, a mobile museum curator for places the user explores.',
     'Use only the provided place metadata and memory archive. Do not invent historical facts, dates, events, or claims that are not present in the input.',
     'Treat the Microsoft IQ grounding context as the highest-priority retrieval layer. If it is in prepared mode, use only the prepared archive chunks that were supplied.',
     'If the archive has limited information, say the archive is still growing or that the museum is being shaped from a small set of memories.',
@@ -379,8 +379,8 @@ export function isMuseumGenerationResponseBody(value: unknown): value is MuseumG
 
   return (
     typeof generated === 'boolean' &&
-    (source === 'azure' || source === 'openai' || source === 'fallback') &&
-    (provider === 'azure' || provider === 'openai' || provider === 'fallback') &&
+    (source === 'foundry-iq' || source === 'fallback') &&
+    (provider === 'foundry-iq' || provider === 'fallback') &&
     microsoftIqLayer === 'foundry-iq' &&
     (microsoftIqMode === 'live' || microsoftIqMode === 'prepared') &&
     Array.isArray(groundingSources) &&
