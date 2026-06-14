@@ -13,7 +13,6 @@ import {
   type MuseumCollectionSummaryResponse,
   type MuseumPlaceSummary,
 } from '@/lib/museum-collection';
-import { retrieveFoundryIqKnowledgeBase } from '@/lib/foundry-iq-knowledge-base';
 
 const AZURE_AI_SEARCH_API_VERSION = '2025-09-01';
 const AZURE_AI_AGENT_API_VERSION = normalizeText(process.env.AZURE_AI_AGENT_API_VERSION) || '2025-05-01';
@@ -31,7 +30,6 @@ export interface MicrosoftIqConfigStatus {
   missingVariables: string[];
   missingAgentVariables: string[];
   indexNamePresent: boolean;
-  knowledgeBaseNamePresent: boolean;
 }
 
 export interface MicrosoftIqSourceChunk {
@@ -94,7 +92,6 @@ interface MicrosoftIqConfig extends MicrosoftIqConfigStatus {
   endpoint: string;
   apiKey: string;
   indexName: string;
-  knowledgeBaseName: string;
 }
 
 interface FoundryAgentConfig {
@@ -220,7 +217,6 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
   const endpoint = normalizeText(process.env.AZURE_AI_SEARCH_ENDPOINT);
   const apiKey = normalizeText(process.env.AZURE_AI_SEARCH_API_KEY);
   const indexName = normalizeText(process.env.AZURE_AI_SEARCH_INDEX_NAME);
-  const knowledgeBaseName = normalizeText(process.env.AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME);
   const projectEndpoint = normalizeText(process.env.AZURE_AI_PROJECT_ENDPOINT);
   const agentId = normalizeText(process.env.AZURE_AI_AGENT_ID);
   const agentApiKey = normalizeText(process.env.AZURE_AI_AGENT_API_KEY);
@@ -229,7 +225,6 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
     !endpoint ? 'AZURE_AI_SEARCH_ENDPOINT' : '',
     !apiKey ? 'AZURE_AI_SEARCH_API_KEY' : '',
     !indexName ? 'AZURE_AI_SEARCH_INDEX_NAME' : '',
-    !knowledgeBaseName ? 'AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME' : '',
   ].filter((value) => value.length > 0);
   const missingAgentVariables = [
     !projectEndpoint ? 'AZURE_AI_PROJECT_ENDPOINT' : '',
@@ -244,7 +239,6 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
     missingVariables,
     missingAgentVariables,
     indexNamePresent: indexName.length > 0,
-    knowledgeBaseNamePresent: knowledgeBaseName.length > 0,
   };
 }
 
@@ -253,14 +247,12 @@ function getMicrosoftIqConfig(): MicrosoftIqConfig {
   const endpoint = cleanEndpoint(normalizeText(process.env.AZURE_AI_SEARCH_ENDPOINT));
   const apiKey = normalizeText(process.env.AZURE_AI_SEARCH_API_KEY);
   const indexName = normalizeText(process.env.AZURE_AI_SEARCH_INDEX_NAME);
-  const knowledgeBaseName = normalizeText(process.env.AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME);
 
   return {
     ...status,
     endpoint,
     apiKey,
     indexName,
-    knowledgeBaseName,
   };
 }
 
@@ -449,7 +441,7 @@ export function buildMicrosoftIqIndexDefinition(indexName: string) {
   };
 }
 
-async function retrieveLiveKnowledgeBaseChunks(
+async function retrieveLiveSearchChunks(
   config: MicrosoftIqConfig,
   payload: MuseumGenerationRequestPayload,
 ): Promise<MicrosoftIqSourceChunk[]> {
@@ -458,28 +450,64 @@ async function retrieveLiveKnowledgeBaseChunks(
     return [];
   }
 
-  const result = await retrieveFoundryIqKnowledgeBase({
-    endpoint: config.endpoint,
-    knowledgeBaseName: config.knowledgeBaseName,
-    apiKey: config.apiKey,
-    query,
-  });
+  const response = await fetch(
+    `${config.endpoint}/indexes/${encodeURIComponent(config.indexName)}/docs/search?api-version=${AZURE_AI_SEARCH_API_VERSION}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': config.apiKey,
+      },
+      body: JSON.stringify({
+        search: query,
+        top: 5,
+        count: true,
+        filter: `placeId eq '${payload.place.id.replace(/'/g, "''")}'`,
+        queryType: 'simple',
+        searchMode: 'any',
+        searchFields: 'placeName,title,sourceLabel,content,searchableText,description,category',
+      }),
+      cache: 'no-store',
+    },
+  );
 
-  if (!result.live) {
-    return [];
+  if (!response.ok) {
+    throw new Error(`Azure AI Search returned ${response.status}.`);
   }
 
-  return result.chunks.map((chunk) => ({
-    id: chunk.id,
-    sourceKind: 'indexed-archive-chunk',
-    sourceLabel: chunk.sourceLabel,
-    title: chunk.title,
-    content: truncateText(chunk.content, 1200),
-    citation: chunk.citation,
-  }));
+  const data = (await response.json()) as { value?: Array<Record<string, unknown>> };
+  const results = Array.isArray(data.value) ? data.value : [];
+
+  return results
+    .map((item, index) => {
+      const content = normalizeText(item.content) || normalizeText(item.chunk) || normalizeText(item.text) || normalizeText(item.description);
+      if (!content) {
+        return null;
+      }
+
+      const rawKind = normalizeText(item.sourceKind) || normalizeText(item.kind) || 'indexed-archive-chunk';
+      const sourceLabel = normalizeText(item.sourceLabel) || mapKindToLabel(rawKind);
+      const id = normalizeText(item.id) || normalizeText(item.chunkId) || `result-${index + 1}`;
+      const title = normalizeText(item.title) || normalizeText(item.name) || buildChunkTitle(sourceLabel, `${index + 1}`);
+      const citation =
+        normalizeText(item.citation) ||
+        normalizeText(item.source) ||
+        normalizeText(item.path) ||
+        `azure-search://${config.indexName}/${id}`;
+
+      return {
+        id,
+        sourceKind: rawKind as MicrosoftIqSourceChunk['sourceKind'],
+        sourceLabel,
+        title,
+        content: truncateText(content, 1200),
+        citation,
+      } satisfies MicrosoftIqSourceChunk;
+    })
+    .filter((chunk): chunk is MicrosoftIqSourceChunk => chunk !== null);
 }
 
-async function retrieveLiveKnowledgeBaseChunksForPayloads(
+async function retrieveLiveSearchChunksForPayloads(
   config: MicrosoftIqConfig,
   payloads: MuseumGenerationRequestPayload[],
 ): Promise<Map<string, MicrosoftIqSourceChunk[]>> {
@@ -487,9 +515,9 @@ async function retrieveLiveKnowledgeBaseChunksForPayloads(
 
   for (const payload of payloads) {
     try {
-      result.set(payload.place.id, await retrieveLiveKnowledgeBaseChunks(config, payload));
+      result.set(payload.place.id, await retrieveLiveSearchChunks(config, payload));
     } catch (error) {
-      console.error(`Foundry IQ knowledge-base retrieval failed for ${payload.place.id}:`, error);
+      console.error(`Microsoft IQ retrieval failed for ${payload.place.id}:`, error);
       result.set(payload.place.id, []);
     }
   }
@@ -507,7 +535,7 @@ export async function buildMicrosoftIqGroundingContext(payload: MuseumGeneration
   }
 
   try {
-    const liveChunks = await retrieveLiveKnowledgeBaseChunks(config, payload);
+    const liveChunks = await retrieveLiveSearchChunks(config, payload);
     if (liveChunks.length === 0) {
       return preparedContext;
     }
@@ -520,7 +548,7 @@ export async function buildMicrosoftIqGroundingContext(payload: MuseumGeneration
       chunks: liveChunks,
     };
   } catch (error) {
-    console.error('Foundry IQ knowledge-base retrieval failed:', error);
+    console.error('Microsoft IQ retrieval failed:', error);
     return preparedContext;
   }
 }
@@ -531,7 +559,7 @@ export async function ensureMicrosoftIqSearchIndex(indexName: string) {
     return {
       created: false,
       status: 'prepared' as const,
-      reason: 'Foundry IQ knowledge-base retrieval is not fully configured.',
+      reason: 'Microsoft IQ search is not fully configured.',
     };
   }
 
@@ -1018,12 +1046,9 @@ export async function generateFoundryIqCollectionSummaries(payloads: MuseumGener
   }
 
   try {
-    const chunksByPlace = await retrieveLiveKnowledgeBaseChunksForPayloads(config, payloads);
-    const sourceChunkCount = Array.from(chunksByPlace.values()).reduce((total, chunks) => total + chunks.length, 0);
-    if (sourceChunkCount === 0) {
-      throw new Error('Foundry IQ knowledge base returned no grounded references.');
-    }
+    const chunksByPlace = await retrieveLiveSearchChunksForPayloads(config, payloads);
     const summaries = await runFoundryAgentSummary(agentConfig, payloads, chunksByPlace);
+    const sourceChunkCount = Array.from(chunksByPlace.values()).reduce((total, chunks) => total + chunks.length, 0);
 
     return {
       mode: 'live',

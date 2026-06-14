@@ -11,11 +11,6 @@ export interface GeoapifyNearbyPlace {
 }
 
 export type TemporaryPlaceOrigin = 'geoapify' | 'search' | 'manual';
-export interface ManualPlaceInput {
-  name: string;
-  address: string;
-  category: string;
-}
 
 const TEMP_PLACE_STORAGE_PREFIX = 'reality-archive:temp-place:';
 
@@ -184,46 +179,6 @@ export function buildTemporaryPlace(place: GeoapifyNearbyPlace, origin: Temporar
       longitude: place.longitude,
     },
     origin,
-  };
-}
-
-export function buildManualPlace(input: ManualPlaceInput): Place {
-  const name = input.name.trim();
-  const address = input.address.trim();
-  const category = input.category.trim();
-  const id = `manual-${slugify(name) || 'place'}-${slugify(address).slice(0, 24) || 'location'}`;
-
-  return {
-    id,
-    name,
-    address,
-    category,
-    description: `A place you added manually under ${category}.`,
-    memoryCount: 0,
-    moods: [deriveMood(category)],
-    memories: [],
-    museum: {
-      livingExhibit: `${name} was added manually as a place you remember and is ready for your own memories.`,
-      placeMood: `Manual archive category: ${category}.`,
-      memoryWallSummary: 'No saved memories yet. This archive stays local until you choose to add and process a memory.',
-      voiceTourScript: [
-        `This is your manually added archive for ${name}.`,
-        'It exists so a place can be remembered even when a map or geocoding service is unavailable.',
-        'Add a personal memory to give this archive its first story.',
-      ],
-      visitorTips: [
-        'Check the place name, address, and category before saving a memory.',
-        'Add only details you are comfortable keeping on this device.',
-        'Cloud curation remains optional and requires separate consent.',
-      ],
-      miniQuest: {
-        title: 'Memory anchor',
-        prompt: 'Capture one detail that explains why this place matters to you.',
-        reward: 'A place exhibit built from your own memory.',
-      },
-      sourcesUsed: ['Manual place entry'],
-    },
-    origin: 'manual',
   };
 }
 

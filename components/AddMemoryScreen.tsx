@@ -8,7 +8,6 @@ import { mockPlaces } from '@/data/mockPlaces';
 import { fetchGeoapifyNearbyPlaces, searchGeoapifyPlacesByText, type GeoapifySearchCenter } from '@/lib/geoapify';
 import { createSavedMemoryId, saveLocalMemory, type MemoryType } from '@/lib/local-memory';
 import {
-  buildManualPlace,
   buildTemporaryPlace,
   buildTemporaryPlaceId,
   readTemporaryPlace,
@@ -52,8 +51,6 @@ type RememberedCategory = (typeof rememberedCategories)[number];
 type ManualCategory = '' | RememberedCategory;
 
 const voiceMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
-const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
-const allowedPhotoTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -82,10 +79,6 @@ function placeSourceLabel(place: PlaceOption | null) {
 
   if (place.origin === 'search' || place.origin === 'manual') {
     return 'Remembered Place';
-  }
-
-  if (place.origin === 'mock') {
-    return 'Demo archive';
   }
 
   return place.category;
@@ -481,19 +474,9 @@ export function AddMemoryScreen() {
       return;
     }
 
-    function useLocalManualPlace() {
-      const manualPlace = buildManualPlace({ name, address, category });
-      storeTemporaryPlace(manualPlace);
-      recordVisitedPlace(manualPlace);
-      selectPlace(manualPlace);
-      setManualName('');
-      setManualAddress('');
-      setManualCategory('');
-    }
-
     const geoapifyKey = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
     if (!geoapifyKey) {
-      useLocalManualPlace();
+      setManualError('Add NEXT_PUBLIC_GEOAPIFY_API_KEY to resolve manual places.');
       return;
     }
 
@@ -512,7 +495,7 @@ export function AddMemoryScreen() {
       const geocodedPlace = geocodedPlaces[0];
 
       if (!geocodedPlace) {
-        useLocalManualPlace();
+        setManualError('Could not resolve that address. Try a more specific address.');
         return;
       }
 
@@ -532,7 +515,7 @@ export function AddMemoryScreen() {
       setManualCategory('');
     } catch {
       if (!controller.signal.aborted) {
-        useLocalManualPlace();
+        setManualError('Manual add could not resolve that address right now.');
       }
     } finally {
       if (manualControllerRef.current === controller) {
@@ -613,22 +596,6 @@ export function AddMemoryScreen() {
     if (!file) {
       setPhotoDataUrl('');
       setPhotoName('');
-      return;
-    }
-
-    if (!allowedPhotoTypes.has(file.type)) {
-      setPhotoDataUrl('');
-      setPhotoName('');
-      setFileError('Choose a JPEG, PNG, or WebP image.');
-      event.target.value = '';
-      return;
-    }
-
-    if (file.size > MAX_PHOTO_BYTES) {
-      setPhotoDataUrl('');
-      setPhotoName('');
-      setFileError('Choose an image smaller than 3 MB.');
-      event.target.value = '';
       return;
     }
 
@@ -818,12 +785,7 @@ export function AddMemoryScreen() {
                 <label className="memory-reference-field">
                   <span>Choose a photo</span>
                   <small>Add one image from this device.</small>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={handlePhotoChange}
-                    className="memory-photo-input"
-                  />
+                  <input type="file" accept="image/*" onChange={handlePhotoChange} className="memory-photo-input" />
                 </label>
 
                 <label className="memory-reference-field">

@@ -16,7 +16,7 @@ import {
 import { mockPlaces } from '@/data/mockPlaces';
 import { GeoapifyPlaceCard } from '@/components/GeoapifyPlaceCard';
 import { fetchGeoapifyNearbyPlaces, searchGeoapifyPlacesByText } from '@/lib/geoapify';
-import { buildManualPlace, buildTemporaryPlace, buildTemporaryPlaceId, type GeoapifyNearbyPlace } from '@/lib/place-archive';
+import { buildTemporaryPlace, buildTemporaryPlaceId, type GeoapifyNearbyPlace } from '@/lib/place-archive';
 import { storeTemporaryPlace } from '@/lib/place-archive';
 import { recordVisitedPlace } from '@/lib/visited-places';
 import type { Coordinates } from '@/types';
@@ -491,13 +491,6 @@ export function ExploreDiscovery() {
     router.push(`/add-memory?${params.toString()}`);
   }
 
-  function openLocalManualPlace(name: string, address: string, category: RememberedCategory) {
-    const place = buildManualPlace({ name, address, category });
-    storeTemporaryPlace(place);
-    recordVisitedPlace(place);
-    router.push(`/add-memory?place=${encodeURIComponent(place.id)}`);
-  }
-
   async function handleManualAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (manualLoading) {
@@ -520,7 +513,7 @@ export function ExploreDiscovery() {
 
     const geoapifyKey = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
     if (!geoapifyKey) {
-      openLocalManualPlace(name, address, category);
+      setManualError('Manual add needs NEXT_PUBLIC_GEOAPIFY_API_KEY to resolve the address. Use search results if available.');
       return;
     }
 
@@ -539,7 +532,7 @@ export function ExploreDiscovery() {
       const geocodedPlace = geocodedPlaces[0];
 
       if (!geocodedPlace) {
-        openLocalManualPlace(name, address, category);
+        setManualError('Could not resolve that address. Try a more specific address or use a search result if available.');
         return;
       }
 
@@ -558,7 +551,7 @@ export function ExploreDiscovery() {
       if (controller.signal.aborted) {
         return;
       }
-      openLocalManualPlace(name, address, category);
+      setManualError('Manual add could not resolve that address right now. Try again or use a search result if available.');
     } finally {
       if (manualControllerRef.current === controller) {
         manualControllerRef.current = null;
@@ -605,7 +598,8 @@ export function ExploreDiscovery() {
               {searchResults.length > 0 ? (
                 <div className="archive-reference-search-results">
                   {searchResults.slice(0, 4).map((place) => {
-                    const distanceLabel = place.kind === 'remote' ? formatDistance(place.distanceMeters) : 'Demo archive';
+                    const distanceLabel =
+                      place.kind === 'remote' ? formatDistance(place.distanceMeters) : '';
 
                     return (
                       <button

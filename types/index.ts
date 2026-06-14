@@ -49,5 +49,4 @@ export interface Place {
   museum: MuseumPreview;
   coordinates?: Coordinates;
   origin?: 'mock' | 'geoapify' | 'search' | 'manual';
-  isDemo?: boolean;
 }

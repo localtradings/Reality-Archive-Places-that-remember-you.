@@ -1802,7 +1802,7 @@ select option {
   }
 }
 
-/* Reality Archive desktop system */
+/* Reality Archive desktop system, matched to reference/imagereference.png */
 :root {
   --archive-black: #050503;
   --archive-black-soft: #0b0a08;
@@ -1818,10 +1818,7 @@ select option {
   --archive-shadow: rgba(0, 0, 0, 0.62);
   --archive-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   --archive-mono: "Courier New", "American Typewriter", monospace;
-  --archive-paper-surface:
-    radial-gradient(circle at 18% 12%, rgba(112, 79, 39, 0.1), transparent 14rem),
-    repeating-linear-gradient(4deg, rgba(60, 39, 17, 0.035) 0 1px, transparent 1px 6px),
-    linear-gradient(135deg, #ead9b8, #d9bf91);
+  --archive-paper-surface: url('../reference/Paper.png');
 }
 
 body {
@@ -1926,11 +1923,8 @@ body {
 .archive-brand-logo-image {
   width: 100%;
   height: 100%;
-  fill: none;
-  stroke: #d8ad72;
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  object-fit: cover;
+  object-position: center;
   filter: drop-shadow(0 0.18rem 0.24rem rgba(0, 0, 0, 0.42));
 }
 
@@ -4794,70 +4788,6 @@ body {
   font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
-}
-
-.cloud-curation-consent {
-  display: grid;
-  gap: 0.9rem;
-  margin-top: 1.35rem;
-  border-top: 1px dashed rgba(47, 33, 15, 0.32);
-  padding-top: 1.2rem;
-}
-
-.cloud-curation-consent h3 {
-  margin: 0.2rem 0 0.45rem;
-  font-family: var(--archive-serif);
-  font-size: 1.12rem;
-}
-
-.cloud-curation-consent p {
-  margin: 0;
-  font-size: 0.92rem;
-}
-
-.cloud-curation-consent__check {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.65rem;
-  align-items: start;
-  font-size: 0.92rem;
-  line-height: 1.4;
-}
-
-.cloud-curation-consent__check input {
-  margin-top: 0.18rem;
-}
-
-.cloud-curation-consent__code {
-  display: grid;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.cloud-curation-consent__code input {
-  min-height: 2.45rem;
-  border: 1px solid rgba(47, 33, 15, 0.4);
-  border-radius: 0.25rem;
-  padding: 0.55rem 0.7rem;
-  background: rgba(255, 252, 241, 0.62);
-  color: #2f210f;
-}
-
-.cloud-curation-consent .museum-reference-open {
-  width: fit-content;
-}
-
-.cloud-curation-consent .museum-reference-open:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-}
-
-.cloud-curation-consent__status {
-  color: #6b4d28;
-  font-style: italic;
 }
 
 .museum-detail-facts dl {

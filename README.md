@@ -1,125 +1,115 @@
 # Reality Archive
 
-**Places that remember you.**
 
-Reality Archive is a living museum for personal place memories. A visitor can discover a nearby place, search for a remembered location, or add one manually; preserve a text, photo, or voice memory; and curate an optional grounded museum story from the archive.
+## AI Runtime
 
-This project is entered in the **Microsoft Agents League Creative Apps track**. GitHub Copilot supported the initial application structure and feature development. Microsoft Foundry and Foundry IQ provide the optional cloud curation path.
+The AI Living Museum is grounded in the archive first:
 
-## Problem
+- place metadata
+- visitor memories
+- photo captions
+- voice transcripts
 
-Travel applications usually optimize for where someone should go next. Reality Archive focuses on places that already matter: an old cafe, a family street, a landmark, or a quiet place connected to a personal memory.
+### Microsoft IQ Integration: Foundry IQ
 
-The application preserves those places without requiring an account or cloud upload. Cloud curation is optional, explicit, and grounded only in archive information supplied by the user.
+Reality Archive satisfies the Microsoft IQ requirement with **Foundry IQ**.
+Microsoft Foundry / Azure AI Foundry is the primary Microsoft AI platform for this project, and
+Reality Archive uses a Foundry IQ retrieval layer built on Azure AI Search for archive grounding.
+Work IQ and Fabric IQ are not used in this prototype.
 
-## Features
+The app does not require separate model runtime keys. The museum page uses the archive's grounded
+static preview, then attaches Microsoft IQ grounding sources from Azure AI Search when the Foundry
+IQ layer is configured.
 
-- Nearby place discovery through browser geolocation and Geoapify.
-- Fully local manual place creation when maps or API keys are unavailable.
-- Text, JPEG/PNG/WebP photo, and two-minute voice memories.
-- Browser-local storage for places, memory text, photos, and recordings.
-- A user-driven Living Museum with no automatically seeded place exhibits.
-- Local museum summaries that do not require Azure.
-- Optional consent-gated Foundry IQ knowledge-base retrieval and Foundry story generation.
-- Grounding citations and a visible distinction between local and verified live responses.
+### Why Foundry IQ
 
-## Microsoft IQ Integration
+Foundry IQ was selected because Reality Archive grounds the AI Living Museum in archive knowledge
+instead of inventing an unmoored story. The generated museum only uses:
 
-Reality Archive implements **Foundry IQ** through an Azure AI Search managed knowledge base.
+- place metadata
+- visitor memories
+- photo captions
+- voice transcripts
 
-The live retrieval call is:
+Azure AI Search is the intended knowledge and retrieval layer for those archive chunks. When live
+search is configured, the app can retrieve indexed place-archive chunks before the museum preview is
+returned. When it is not configured, the app still prepares the exact normalized archive document
+and source chunks that would be indexed.
 
-```text
-POST /knowledgebases/{knowledgeBaseName}/retrieve?api-version=2026-05-01-preview
-```
+### Fallbacks
 
-The application first uploads normalized archive documents to the configured Azure AI Search index. It then asks the configured knowledge base to retrieve grounded archive passages. A response is labeled `live` only when the knowledge-base response contains usable passages and references. Direct index search and local fallback output are never represented as live Foundry IQ.
+- Foundry IQ through Azure AI Search is the only Microsoft IQ integration path.
+- If Azure AI Search is not configured, the app returns the grounded static museum preview with prepared archive context.
+- The app must not claim live Microsoft IQ grounding unless the museum response `microsoftIqMode` is `live`.
 
-Official references:
+### Azure for Students Note
 
-- [What is Foundry IQ?](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/what-is-foundry-iq)
-- [Retrieve data using a knowledge base](https://learn.microsoft.com/en-us/azure/search/agentic-retrieval-how-to-retrieve)
+Azure for Students can have limited service quota. Reality Archive only needs the Azure AI
+Search-backed Foundry IQ path. The Foundry IQ retrieval layer can still run in prepared mode when
+Azure AI Search is not configured, and the app keeps the grounded static museum preview available.
 
 ## GitHub Copilot
 
-GitHub Copilot, using MAI-Code-1-Flash, was used during the early and middle development phases. It helped scaffold the Next.js App Router project, create initial reusable components, organize routes, build the first place and memory flows, and assist with Leaflet, OpenStreetMap, Geoapify, local storage, and the initial museum prototype.
-Codex gpt5.5 was later used for debugging a responsive UI.
+GitHub Copilot, using MAI-Code-1-Flash, was used during the early and mid development phases of Reality Archive. It helped scaffold the initial Next.js App Router structure, create the first reusable UI components, set up mock place and memory data, and build the first clickable prototype flow. This included the Home page, Explore page, Place Archive page, Add Memory page, and Museum page.
 
-## Privacy
+Copilot was also used to assist with the first version of the app’s core features. This included the mobile-first layout, place cards, memory cards, mood badges, early mock archive data, and the early AI Living Museum preview. It helped speed up development by suggesting TypeScript structure, component patterns, reusable UI logic, and route organization.
 
-Place records, memory text, selected photos, and voice recordings are stored in the current browser. Geolocation is shared with Geoapify only for nearby discovery. OpenStreetMap tile servers receive normal map requests.
+GitHub Copilot, using MAI-Code-1-Flash, was used during the early and mid development phases of Reality Archive. It helped scaffold the initial Next.js App Router structure, create the first reusable UI components, set up mock place and memory data, and build the first clickable prototype flow. This included the Home page, Explore page, Place Archive page, Add Memory page, and Museum page.
 
-Nothing is sent to Microsoft Azure automatically. Before optional cloud curation, the application explains that place details, memory text, photo captions, and voice transcripts will be sent to Azure. The user must explicitly consent and authenticate the demo session. Photo files and recorded audio remain local.
+Copilot also helped implement the live place discovery and memory capture features. It assisted with integrating Leaflet, OpenStreetMap, browser geolocation, and Geoapify nearby place discovery. It also helped build the local memory system, including text memories, photo picker and preview support, a voice transcript stub, and localStorage saving.
 
-Read [docs/PRIVACY.md](docs/PRIVACY.md) for the complete data flow.
+For the AI Living Museum feature, Copilot helped create and refine the first version of the generation flow. This included work on `app/api/generate-museum/route.ts`, `lib/museum-generation.ts`, and `components/MuseumExperience.tsx`. These files helped define the museum generation API route, shared request and response logic, session caching, and the client-side museum experience.
 
-## Architecture
+Later in the project, Codex GPT-5.5 was used for debugging. Codex helped improve the UI/UX redesign, including the dark archive/storybook visual style, desktop responsive layouts, torn-paper design system, empty-state screens, and final interface polish. The UI redesign was done using Codex. Overall, GitHub Copilot contributed heavily to the core app structure, prototype flow, map discovery, memory capture, and first AI Living Museum implementation.
 
-![Reality Archive architecture](docs/architecture.svg)
+## Environment Variables
 
-The editable explanation and Mermaid source are in [docs/architecture.md](docs/architecture.md).
-
-## Security Controls
-
-- Signed, expiring, HTTP-only, SameSite Strict demo sessions.
-- Same-origin validation for all Azure-backed POST routes.
-- Explicit privacy-consent header required for cloud operations.
-- Request-body size limits and per-session rate limits.
-- Server-only Azure credentials.
-- CSP, framing protection, content-type protection, restrictive permissions policy, and referrer policy.
-- Three-megabyte image limit with JPEG/PNG/WebP allowlisting.
-- Local fallback when cloud configuration or retrieval is unavailable.
-
-Read [docs/SECURITY.md](docs/SECURITY.md) for limitations and vulnerability reporting.
-
-## Environment
-
-Copy `.env.example` to `.env.local`. Keep real values out of Git.
+Copy `.env.example` to `.env.local` and fill in the values.
 
 ```bash
-MICROSOFT_IQ_ENABLED=false
-MICROSOFT_IQ_DEMO_ACCESS_CODE=
-MICROSOFT_IQ_SESSION_SECRET=
-
+MICROSOFT_IQ_ENABLED=true
 AZURE_AI_SEARCH_ENDPOINT=
 AZURE_AI_SEARCH_API_KEY=
 AZURE_AI_SEARCH_INDEX_NAME=
-AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME=
-
 AZURE_AI_PROJECT_ENDPOINT=
 AZURE_AI_AGENT_ID=
 AZURE_AI_AGENT_API_KEY=
 
+# Public browser key for Geoapify only
 NEXT_PUBLIC_GEOAPIFY_API_KEY=
 ```
 
-Requirements:
+Only the `NEXT_PUBLIC_` Geoapify key is exposed to the browser. The Azure AI Search key stays server-side.
 
-- `MICROSOFT_IQ_SESSION_SECRET`: at least 32 random characters.
-- `MICROSOFT_IQ_DEMO_ACCESS_CODE`: at least 12 characters.
-- `APP_ORIGIN`: exact deployed origin, such as `https://example.com`.
-- `AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME`: an existing knowledge base connected to the archive index.
-- Only `NEXT_PUBLIC_GEOAPIFY_API_KEY` is browser-visible. Restrict that key by allowed domains and quota.
+Do not commit real `.env.local` values. Use `.env.example` only as a placeholder template.
+
+## Where to Find Microsoft IQ Values
+
+- `MICROSOFT_IQ_ENABLED`: set to `true` only when Azure AI Search is ready.
+- `AZURE_AI_SEARCH_ENDPOINT`: Azure AI Search resource endpoint.
+- `AZURE_AI_SEARCH_API_KEY`: Azure AI Search admin/query key used server-side only.
+- `AZURE_AI_SEARCH_INDEX_NAME`: the index name for Reality Archive source chunks.
+- `AZURE_AI_PROJECT_ENDPOINT`: Azure AI Foundry project endpoint used by the existing Agent.
+- `AZURE_AI_AGENT_ID`: existing Foundry Agent ID that writes museum summaries.
+- `AZURE_AI_AGENT_API_KEY`: server-side token/key used to call the configured Foundry Agent.
+
+## Troubleshooting
+
+- If provider is `fallback`, the app is showing the static archive preview.
+- If provider is `foundry-iq`, the app is using the Microsoft IQ / Foundry IQ path.
+- If `microsoftIqMode` is `prepared`, Azure AI Search is disabled, incomplete, or returned no usable chunks.
+- If `microsoftIqMode` is `live`, the app retrieved grounding chunks from Azure AI Search before returning the museum preview.
 
 ## Development
 
 ```bash
 npm install
-npm test
-npm run typecheck
 npm run build
 npm run dev
 ```
 
-## Submission
+## Notes
 
-- [Project description](docs/SUBMISSION_TEXT.md)
-- [Architecture](docs/architecture.md)
-- [Demo script](docs/DEMO_SCRIPT.md)
-- [Final checklist](docs/SUBMISSION_CHECKLIST.md)
-- [Asset rights](docs/ASSET_RIGHTS.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
-
-## License
-
-Reality Archive source code is available under the [MIT License](LICENSE). Third-party packages, services, map data, and trademarks remain subject to their own terms.
+- The museum route always stays grounded in the selected place archive.
+- The Microsoft IQ layer is Foundry IQ, with Azure AI Search as the retrieval surface.
+- The UI does not expose any AI keys to the browser.

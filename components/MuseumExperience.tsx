@@ -2,9 +2,8 @@
 
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArchiveShell } from '@/components/ArchiveUI';
-import { CloudCurationConsent } from '@/components/CloudCurationConsent';
 import { mockPlaces } from '@/data/mockPlaces';
 import { formatMemoryTypeLabel, readLocalMemories, type MemoryType, type SavedMemory } from '@/lib/local-memory';
 import type { MuseumCollectionMode, MuseumCollectionSummaryResponse, MuseumPlaceSummary } from '@/lib/museum-collection';
@@ -150,14 +149,14 @@ function getStoryStatusLabel(state: FoundryStoryState, mode: MuseumCollectionMod
   }
 
   if (state === 'prepared') {
-    return 'Local fallback';
+    return 'Foundry IQ fallback';
   }
 
   if (state === 'error') {
     return 'Foundry IQ failed';
   }
 
-  return 'Local archive story';
+  return 'Foundry IQ story';
 }
 
 export function MuseumExperience() {
@@ -172,6 +171,8 @@ export function MuseumExperience() {
   const [foundryStoryMode, setFoundryStoryMode] = useState<MuseumCollectionMode | null>(null);
   const [foundryStoryReason, setFoundryStoryReason] = useState('');
   const [foundryStoryError, setFoundryStoryError] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
+  const lastFoundryRequestKey = useRef('');
   const searchParamsString = useMemo(() => searchParams.toString(), [searchParams]);
   const archivePayload = useMemo(() => (place ? buildMuseumGenerationRequestPayload(place, localMemories) : null), [place, localMemories]);
   const archiveSignature = useMemo(() => (archivePayload ? createMuseumArchiveSignature(archivePayload) : ''), [archivePayload]);
@@ -215,76 +216,81 @@ export function MuseumExperience() {
     setLocalMemories(readLocalMemories(placeId));
   }, [placeId]);
 
-  async function loadFoundryStory(accessCode?: string) {
+  useEffect(() => {
     if (!archivePayload || !archiveSignature) {
-      throw new Error('This archive is not ready for cloud curation.');
+      return;
     }
 
     const requestPayload = archivePayload;
+    const requestKey = `${archivePayload.place.id}:${archiveSignature}:${retryCount}`;
+    if (lastFoundryRequestKey.current === requestKey) {
+      return;
+    }
+
+    let cancelled = false;
+    lastFoundryRequestKey.current = requestKey;
     setFoundryStoryState('loading');
     setFoundryStoryMode(null);
     setFoundryStory(null);
     setFoundryStoryReason('');
     setFoundryStoryError('');
 
-    try {
-      if (accessCode) {
-        const sessionResponse = await fetch('/api/microsoft-iq/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          cache: 'no-store',
-          body: JSON.stringify({ accessCode }),
-        });
-        const sessionData = (await sessionResponse.json()) as unknown;
-        if (!sessionResponse.ok) {
-          throw new Error(isRecord(sessionData) && typeof sessionData.error === 'string' ? sessionData.error : 'Demo access failed.');
-        }
-      }
-
-      const response = await fetch('/api/microsoft-iq/summaries', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-reality-archive-cloud-consent': 'granted',
-        },
-        credentials: 'same-origin',
-        cache: 'no-store',
-        body: JSON.stringify({ places: [requestPayload] }),
-      });
-
-      const responseText = await response.text();
-      let data: unknown = null;
+    async function loadFoundryStory() {
       try {
-        data = responseText ? JSON.parse(responseText) : null;
-      } catch {
-        data = null;
-      }
+        const response = await fetch('/api/microsoft-iq/summaries', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify({ places: [requestPayload] }),
+        });
 
-      if (!response.ok) {
-        throw new Error(isRecord(data) && typeof data.error === 'string' ? data.error : 'Foundry IQ summary request failed.');
-      }
+        const responseText = await response.text();
+        let data: unknown = null;
+        try {
+          data = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          data = null;
+        }
 
-      const summaryResponse = normalizeSummaryResponse(data);
-      const story = summaryResponse?.places.find((item) => item.placeId === requestPayload.place.id) ?? summaryResponse?.places[0] ?? null;
-      if (!summaryResponse || !story || summaryResponse.mode !== 'live') {
-        throw new Error(summaryResponse?.reason || 'Foundry IQ did not return a grounded live story for this place.');
-      }
+        if (!response.ok) {
+          throw new Error(isRecord(data) && typeof data.error === 'string' ? data.error : 'Foundry IQ summary request failed.');
+        }
 
-      setFoundryStory(story);
-      setFoundryStoryMode(summaryResponse.mode);
-      setFoundryStoryState('live');
-      setFoundryStoryReason('');
-    } catch (error) {
-      setFoundryStoryState('error');
-      setFoundryStoryMode(null);
-      setFoundryStory(null);
-      setFoundryStoryReason('');
-      const message = error instanceof Error ? error.message : 'Foundry IQ could not write this story.';
-      setFoundryStoryError(message);
-      throw error;
+        const summaryResponse = normalizeSummaryResponse(data);
+        const story = summaryResponse?.places.find((item) => item.placeId === requestPayload.place.id) ?? summaryResponse?.places[0] ?? null;
+        if (!summaryResponse || !story) {
+          throw new Error('Foundry IQ did not return a story summary for this place.');
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setFoundryStory(story);
+        setFoundryStoryMode(summaryResponse.mode);
+        setFoundryStoryState(summaryResponse.mode === 'live' ? 'live' : 'prepared');
+        setFoundryStoryReason(summaryResponse.reason ?? '');
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setFoundryStoryState('error');
+        setFoundryStoryMode(null);
+        setFoundryStory(null);
+        setFoundryStoryReason('');
+        setFoundryStoryError(error instanceof Error ? error.message : 'Foundry IQ could not write this story.');
+      }
     }
-  }
+
+    void loadFoundryStory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [archivePayload, archiveSignature, retryCount]);
 
   if (isResolvingPlace) {
     return (
@@ -338,7 +344,7 @@ export function MuseumExperience() {
         <section className="museum-detail-grid">
           <article className="museum-detail-paper museum-detail-summary">
             <div className="museum-detail-section-heading">
-              <p className="museum-detail-kicker">Museum Story</p>
+              <p className="museum-detail-kicker">Foundry IQ Story</p>
               <span className={`museum-detail-status museum-detail-status--${foundryStoryState}`}>
                 {getStoryStatusLabel(foundryStoryState, foundryStoryMode)}
               </span>
@@ -357,14 +363,11 @@ export function MuseumExperience() {
             {foundryStoryState === 'error' ? (
               <div className="museum-detail-story-alert">
                 <p>{foundryStoryError}</p>
+                <button type="button" onClick={() => setRetryCount((count) => count + 1)}>
+                  Retry Foundry IQ
+                </button>
               </div>
             ) : null}
-
-            <CloudCurationConsent
-              state={foundryStoryState}
-              reason={foundryStoryReason}
-              onGenerate={loadFoundryStory}
-            />
 
             <p className="museum-detail-muted">
               {foundryStoryState === 'live'
@@ -373,7 +376,7 @@ export function MuseumExperience() {
                   ? foundryStoryReason || 'Foundry IQ was called, but the live story was not available, so a grounded fallback is shown.'
                   : foundryStoryState === 'error'
                     ? 'The local fallback remains visible until Foundry IQ returns a live story.'
-                    : 'This local story stays on your device until you explicitly request Microsoft cloud curation.'}
+                    : 'Foundry IQ is creating the story from the context you saved.'}
             </p>
           </article>
 
