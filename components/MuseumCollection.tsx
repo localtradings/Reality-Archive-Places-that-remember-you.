@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ArchiveShell } from '@/components/ArchiveUI';
 import { formatMemoryTypeLabel, readLocalMemories, type MemoryType, type SavedMemory } from '@/lib/local-memory';
@@ -58,7 +59,7 @@ function BuildingSketch() {
   );
 }
 
-function MuseumPlaceCard({ place }: { place: VisitedPlace }) {
+function MuseumPlaceCard({ place, onOpenRequest }: { place: VisitedPlace; onOpenRequest: (place: VisitedPlace) => void }) {
   const localMemories = readLocalMemories(place.id);
   const latestMemory = localMemories[0];
   const memoryTypes = uniqueMemoryTypes(localMemories);
@@ -121,9 +122,9 @@ function MuseumPlaceCard({ place }: { place: VisitedPlace }) {
               </div>
             </div>
           </div>
-          <Link href={`/museum/${place.id}`} className="museum-reference-open">
+          <button type="button" className="museum-reference-open museum-reference-open-button" onClick={() => onOpenRequest(place)}>
             Open <span aria-hidden="true">→</span>
-          </Link>
+          </button>
         </div>
       </div>
     </article>
@@ -131,7 +132,9 @@ function MuseumPlaceCard({ place }: { place: VisitedPlace }) {
 }
 
 export function MuseumCollection() {
+  const router = useRouter();
   const [visitedPlaces, setVisitedPlaces] = useState<VisitedPlace[]>([]);
+  const [pendingCloudPlace, setPendingCloudPlace] = useState<VisitedPlace | null>(null);
 
   useEffect(() => {
     setVisitedPlaces(readVisitedPlaces());
@@ -141,6 +144,20 @@ export function MuseumCollection() {
     () => [...visitedPlaces].sort((a, b) => Date.parse(b.lastVisitedAt) - Date.parse(a.lastVisitedAt)),
     [visitedPlaces],
   );
+
+  function closeCloudWarning() {
+    setPendingCloudPlace(null);
+  }
+
+  function continueWithCloudProcessing() {
+    if (!pendingCloudPlace) {
+      return;
+    }
+
+    const placeId = pendingCloudPlace.id;
+    setPendingCloudPlace(null);
+    router.push(`/museum/${placeId}`);
+  }
 
   return (
     <ArchiveShell hideTopbar className="archive-workspace--museum-reference">
@@ -164,11 +181,36 @@ export function MuseumCollection() {
               <span aria-hidden="true" />
             </div>
             <div className="museum-reference-grid">
-              {sortedPlaces.map((place) => <MuseumPlaceCard key={place.id} place={place} />)}
+              {sortedPlaces.map((place) => <MuseumPlaceCard key={place.id} place={place} onOpenRequest={setPendingCloudPlace} />)}
             </div>
           </section>
         ) : null}
       </section>
+      {pendingCloudPlace ? (
+        <div className="museum-cloud-warning-backdrop" role="presentation">
+          <section
+            aria-labelledby="museum-cloud-warning-title"
+            aria-modal="true"
+            className="museum-cloud-warning"
+            role="dialog"
+          >
+            <h2 id="museum-cloud-warning-title">Do you want to continue with cloud processing?</h2>
+            <p>
+              To complete this request, the app may send the selected archive details to Azure, including place information,
+              memory text, photo captions, voice transcripts, moods, timestamps, and coordinates when available.
+            </p>
+            <p>No archive data is sent automatically. This will only happen if you choose to continue.</p>
+            <div className="museum-cloud-warning-actions">
+              <button type="button" className="museum-cloud-warning-cancel" onClick={closeCloudWarning}>
+                Cancel
+              </button>
+              <button type="button" className="museum-reference-open museum-cloud-warning-confirm" onClick={continueWithCloudProcessing}>
+                Yes, send to Azure
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </ArchiveShell>
   );
 }
