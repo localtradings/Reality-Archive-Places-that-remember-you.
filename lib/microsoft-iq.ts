@@ -543,6 +543,27 @@ export async function ensureMicrosoftIqSearchIndex(indexName: string) {
     };
   }
 
+  const existingIndexResponse = await fetch(`${config.endpoint}/indexes/${encodeURIComponent(indexName)}?api-version=${AZURE_AI_SEARCH_API_VERSION}`, {
+    method: 'GET',
+    headers: {
+      'api-key': config.apiKey,
+    },
+    cache: 'no-store',
+  });
+
+  if (existingIndexResponse.ok) {
+    return {
+      created: false,
+      status: 'live' as const,
+      reason: undefined,
+    };
+  }
+
+  if (existingIndexResponse.status !== 404) {
+    const errorText = (await existingIndexResponse.text()).slice(0, 800);
+    throw new Error(`Azure AI Search index lookup failed with ${existingIndexResponse.status}: ${errorText}`);
+  }
+
   const response = await fetch(`${config.endpoint}/indexes/${encodeURIComponent(indexName)}?api-version=${AZURE_AI_SEARCH_API_VERSION}`, {
     method: 'PUT',
     headers: {
