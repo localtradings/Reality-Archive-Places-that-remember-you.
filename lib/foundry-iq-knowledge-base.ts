@@ -3,6 +3,7 @@ const FOUNDRY_IQ_API_VERSION = '2026-05-01-preview';
 interface FoundryIqRetrieveOptions {
   endpoint: string;
   knowledgeBaseName: string;
+  knowledgeSourceName: string;
   apiKey: string;
   query: string;
 }
@@ -87,10 +88,11 @@ function buildReferenceCitation(reference: FoundryIqReference, id: string, sourc
 export function buildFoundryIqRetrieveRequest(options: FoundryIqRetrieveOptions) {
   const endpoint = cleanEndpoint(options.endpoint);
   const knowledgeBaseName = options.knowledgeBaseName.trim();
+  const knowledgeSourceName = options.knowledgeSourceName.trim();
   const query = options.query.trim();
 
-  if (!endpoint || !knowledgeBaseName || !options.apiKey.trim() || !query) {
-    throw new Error('Foundry IQ knowledge-base endpoint, name, API key, and query are required.');
+  if (!endpoint || !knowledgeBaseName || !knowledgeSourceName || !options.apiKey.trim() || !query) {
+    throw new Error('Foundry IQ knowledge-base endpoint, knowledge base, knowledge source, API key, and query are required.');
   }
 
   return {
@@ -102,15 +104,22 @@ export function buildFoundryIqRetrieveRequest(options: FoundryIqRetrieveOptions)
         'api-key': options.apiKey.trim(),
       },
       body: {
-        messages: [
+        intents: [
           {
-            role: 'user',
-            content: [{ type: 'text', text: query }],
+            type: 'semantic',
+            search: query,
           },
         ],
         includeActivity: true,
-        outputMode: 'extractedData',
-        retrievalReasoningEffort: { kind: 'low' },
+        retrievalReasoningEffort: { kind: 'minimal' },
+        knowledgeSourceParams: [
+          {
+            knowledgeSourceName,
+            kind: 'searchIndex',
+            includeReferences: true,
+            includeReferenceSourceData: true,
+          },
+        ],
         maxOutputDocuments: 20,
         maxOutputSize: 6_000,
       },

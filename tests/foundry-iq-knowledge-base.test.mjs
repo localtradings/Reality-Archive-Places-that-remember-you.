@@ -10,6 +10,7 @@ test('builds the official Foundry IQ knowledge-base retrieve request', () => {
   const request = buildFoundryIqRetrieveRequest({
     endpoint: 'https://reality-archive.search.windows.net/',
     knowledgeBaseName: 'reality-archive-kb',
+    knowledgeSourceName: 'reality-archive-ks',
     apiKey: 'server-secret',
     query: 'Iloilo River Esplanade calm memory',
   });
@@ -20,15 +21,23 @@ test('builds the official Foundry IQ knowledge-base retrieve request', () => {
   );
   assert.equal(request.init.method, 'POST');
   assert.equal(request.init.headers['api-key'], 'server-secret');
-  assert.deepEqual(request.init.body.messages, [
+  assert.deepEqual(request.init.body.intents, [
     {
-      role: 'user',
-      content: [{ type: 'text', text: 'Iloilo River Esplanade calm memory' }],
+      type: 'semantic',
+      search: 'Iloilo River Esplanade calm memory',
     },
   ]);
   assert.equal(request.init.body.includeActivity, true);
-  assert.equal(request.init.body.outputMode, 'extractedData');
-  assert.deepEqual(request.init.body.retrievalReasoningEffort, { kind: 'low' });
+  assert.equal(Object.hasOwn(request.init.body, 'outputMode'), false);
+  assert.deepEqual(request.init.body.retrievalReasoningEffort, { kind: 'minimal' });
+  assert.deepEqual(request.init.body.knowledgeSourceParams, [
+    {
+      knowledgeSourceName: 'reality-archive-ks',
+      kind: 'searchIndex',
+      includeReferences: true,
+      includeReferenceSourceData: true,
+    },
+  ]);
   assert.equal(request.init.body.maxOutputDocuments, 20);
   assert.equal(request.init.body.maxOutputSize, 6_000);
 });

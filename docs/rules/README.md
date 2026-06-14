@@ -85,6 +85,7 @@ AZURE_AI_SEARCH_ENDPOINT=
 AZURE_AI_SEARCH_API_KEY=
 AZURE_AI_SEARCH_INDEX_NAME=
 AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME=
+AZURE_AI_SEARCH_KNOWLEDGE_SOURCE_NAME=
 
 AZURE_AI_PROJECT_ENDPOINT=
 AZURE_AI_AGENT_ID=
@@ -99,6 +100,7 @@ Requirements:
 - `MICROSOFT_IQ_DEMO_ACCESS_CODE`: at least 12 characters.
 - `APP_ORIGIN`: exact deployed origin, such as `https://example.com`.
 - `AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME`: an existing knowledge base connected to the archive index.
+- `AZURE_AI_SEARCH_KNOWLEDGE_SOURCE_NAME`: the search-index knowledge source inside that knowledge base.
 - Only `NEXT_PUBLIC_GEOAPIFY_API_KEY` is browser-visible. Restrict that key by allowed domains and quota.
 
 ## Development

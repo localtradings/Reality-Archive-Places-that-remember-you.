@@ -32,6 +32,7 @@ export interface MicrosoftIqConfigStatus {
   missingAgentVariables: string[];
   indexNamePresent: boolean;
   knowledgeBaseNamePresent: boolean;
+  knowledgeSourceNamePresent: boolean;
 }
 
 export interface MicrosoftIqSourceChunk {
@@ -95,6 +96,7 @@ interface MicrosoftIqConfig extends MicrosoftIqConfigStatus {
   apiKey: string;
   indexName: string;
   knowledgeBaseName: string;
+  knowledgeSourceName: string;
 }
 
 interface FoundryAgentConfig {
@@ -221,6 +223,7 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
   const apiKey = normalizeText(process.env.AZURE_AI_SEARCH_API_KEY);
   const indexName = normalizeText(process.env.AZURE_AI_SEARCH_INDEX_NAME);
   const knowledgeBaseName = normalizeText(process.env.AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME);
+  const knowledgeSourceName = normalizeText(process.env.AZURE_AI_SEARCH_KNOWLEDGE_SOURCE_NAME);
   const projectEndpoint = normalizeText(process.env.AZURE_AI_PROJECT_ENDPOINT);
   const agentId = normalizeText(process.env.AZURE_AI_AGENT_ID);
   const agentApiKey = normalizeText(process.env.AZURE_AI_AGENT_API_KEY);
@@ -230,6 +233,7 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
     !apiKey ? 'AZURE_AI_SEARCH_API_KEY' : '',
     !indexName ? 'AZURE_AI_SEARCH_INDEX_NAME' : '',
     !knowledgeBaseName ? 'AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME' : '',
+    !knowledgeSourceName ? 'AZURE_AI_SEARCH_KNOWLEDGE_SOURCE_NAME' : '',
   ].filter((value) => value.length > 0);
   const missingAgentVariables = [
     !projectEndpoint ? 'AZURE_AI_PROJECT_ENDPOINT' : '',
@@ -245,6 +249,7 @@ export function getMicrosoftIqConfigStatus(): MicrosoftIqConfigStatus {
     missingAgentVariables,
     indexNamePresent: indexName.length > 0,
     knowledgeBaseNamePresent: knowledgeBaseName.length > 0,
+    knowledgeSourceNamePresent: knowledgeSourceName.length > 0,
   };
 }
 
@@ -254,6 +259,7 @@ function getMicrosoftIqConfig(): MicrosoftIqConfig {
   const apiKey = normalizeText(process.env.AZURE_AI_SEARCH_API_KEY);
   const indexName = normalizeText(process.env.AZURE_AI_SEARCH_INDEX_NAME);
   const knowledgeBaseName = normalizeText(process.env.AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME);
+  const knowledgeSourceName = normalizeText(process.env.AZURE_AI_SEARCH_KNOWLEDGE_SOURCE_NAME);
 
   return {
     ...status,
@@ -261,6 +267,7 @@ function getMicrosoftIqConfig(): MicrosoftIqConfig {
     apiKey,
     indexName,
     knowledgeBaseName,
+    knowledgeSourceName,
   };
 }
 
@@ -461,6 +468,7 @@ async function retrieveLiveKnowledgeBaseChunks(
   const result = await retrieveFoundryIqKnowledgeBase({
     endpoint: config.endpoint,
     knowledgeBaseName: config.knowledgeBaseName,
+    knowledgeSourceName: config.knowledgeSourceName,
     apiKey: config.apiKey,
     query,
   });

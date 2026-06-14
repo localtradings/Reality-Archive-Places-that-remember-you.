@@ -15,5 +15,6 @@ export async function GET() {
     missingAgentVariables: status.missingAgentVariables,
     indexNamePresent: status.indexNamePresent,
     knowledgeBaseNamePresent: status.knowledgeBaseNamePresent,
+    knowledgeSourceNamePresent: status.knowledgeSourceNamePresent,
   });
 }
